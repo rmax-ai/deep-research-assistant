@@ -83,7 +83,7 @@ async def section_writer(
         f"Status: {c.get('epistemic_status', 'unknown')} | "
         f"Qualifiers: {c.get('qualifiers', [])}\n"
         f"Text: {c.get('text', '')}"
-        for cid, c in zip(claim_ids, section_claims)
+        for cid, c in zip(claim_ids, section_claims, strict=False)
     )
 
     prompt = f"""Section: {section.get('title', 'Untitled')}
