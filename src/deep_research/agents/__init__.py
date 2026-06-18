@@ -74,21 +74,21 @@ async def generate_structured(
     return response.text
 
 
-def parse_json_response(text: str, default: dict[str, Any] | None = None) -> dict[str, Any]:
+def parse_json_response(text: str, default: Any = None) -> Any:
     """Parse JSON from model response with robust error recovery.
 
     Handles:
     - Code-fenced JSON (```json ... ```)
-    - Bare JSON objects
+    - Bare JSON objects or arrays
     - Trailing commas
     - Leading/trailing whitespace
 
     Args:
         text: Raw model response text.
-        default: Default value if parsing fails completely.
+        default: Default value if parsing fails completely (None → {}).
 
     Returns:
-        Parsed dict, or default (empty dict if None).
+        Parsed dict/list, or default.
     """
     if default is None:
         default = {}
