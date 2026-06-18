@@ -18,8 +18,44 @@ logger = logging.getLogger(__name__)
 # ── Node implementations (Phase 0 stubs) ───────────────────────────────────
 
 async def scope_classify(ctx: Context, node_input: Any) -> dict[str, Any]:
-    logger.info("scope_classify")
-    return {"risk_level": "medium", "message": "Scope classification stub"}
+    """Classify and scope the research request using Research Director agent.
+
+    Extracts the user's objective from node_input (the user message content),
+    runs the Research Director LLM agent, and stores the plan in session state.
+    """
+    logger.info("scope_classify: running Research Director")
+
+    # Extract user objective from the input
+    user_text = ""
+    if isinstance(node_input, dict):
+        user_text = node_input.get("content", node_input.get("text", ""))
+    elif isinstance(node_input, str):
+        user_text = node_input
+    elif hasattr(node_input, "parts"):
+        # ADK genai.types.Content
+        parts = getattr(node_input, "parts", [])
+        user_text = " ".join(getattr(p, "text", "") for p in parts if hasattr(p, "text"))
+
+    if not user_text:
+        return {"status": "ok", "risk_level": "medium", "message": "No user input — using defaults"}
+
+    from deep_research.agents.research_director import research_director
+
+    plan = await research_director(user_text)
+
+    # Store plan components in session state for downstream nodes
+    ctx.session.state["app:research_plan"] = plan
+    ctx.session.state["app:objective"] = plan.get("objective", {})
+    ctx.session.state["app:scope"] = plan.get("scope", {})
+    ctx.session.state["app:proposed_perspectives"] = plan.get("proposed_perspectives", [])
+
+    return {
+        "status": "ok",
+        "risk_level": plan.get("scope", {}).get("risk_level", "medium"),
+        "objective_title": plan.get("objective", {}).get("title", ""),
+        "perspective_count": len(plan.get("proposed_perspectives", [])),
+        "message": f"Research plan generated: {plan.get('objective', {}).get('title', 'Untitled')}",
+    }
 
 
 async def perspective_generate(ctx: Context, node_input: Any) -> dict[str, Any]:
