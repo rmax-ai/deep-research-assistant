@@ -71,6 +71,8 @@ select = [
 ignore = [
     "E501",  # line too long (handled by formatter)
     "B008",  # do not perform function calls in argument defaults
+    "UP037", # quoted annotations needed for Pydantic forward refs
+    "F821",  # undefined names resolved at runtime
 ]
 
 [tool.ruff.lint.isort]
@@ -79,8 +81,8 @@ known-first-party = ["deep_research"]
 [tool.mypy]
 strict = true
 python_version = "3.12"
-packages = ["src/deep_research"]
-explicit_package_bases = true
+mypy_path = "src"
+packages = ["deep_research"]
 
 [[tool.mypy.overrides]]
 module = ["google.adk.*"]
