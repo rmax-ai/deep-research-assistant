@@ -12,6 +12,8 @@ from typing import Any
 from google.adk.agents.context import Context
 from google.adk.workflow import START, Edge, FunctionNode, Workflow
 
+from deep_research.workflow.state import get_state
+
 logger = logging.getLogger(__name__)
 
 
@@ -44,10 +46,10 @@ async def scope_classify(ctx: Context, node_input: Any) -> dict[str, Any]:
     plan = await research_director(user_text)
 
     # Store plan components in session state for downstream nodes
-    ctx.session.state["app:research_plan"] = plan
-    ctx.session.state["app:objective"] = plan.get("objective", {})
-    ctx.session.state["app:scope"] = plan.get("scope", {})
-    ctx.session.state["app:proposed_perspectives"] = plan.get("proposed_perspectives", [])
+    get_state()["app:research_plan"] = plan
+    get_state()["app:objective"] = plan.get("objective", {})
+    get_state()["app:scope"] = plan.get("scope", {})
+    get_state()["app:proposed_perspectives"] = plan.get("proposed_perspectives", [])
 
     return {
         "status": "ok",
@@ -65,28 +67,28 @@ async def perspective_generate(ctx: Context, node_input: Any) -> dict[str, Any]:
     stores them in session state.
     """
     logger.info("perspective_generate: running Perspective Planner")
-    scope = ctx.session.state.get("app:scope", {})
-    objective = ctx.session.state.get("app:objective", {})
+    scope = get_state().get("app:scope", {})
+    objective = get_state().get("app:objective", {})
     user_text = objective.get("primary_question", "")
 
     from deep_research.agents.perspective_planner import perspective_planner
 
     perspectives = await perspective_planner(scope, user_text)
-    ctx.session.state["app:perspectives"] = perspectives
+    get_state()["app:perspectives"] = perspectives
     return {"perspective_count": len(perspectives), "message": f"Generated {len(perspectives)} perspectives"}
 
 
 async def question_graph_build(ctx: Context, node_input: Any) -> dict[str, Any]:
     """Build question graph using Question Architect agent."""
     logger.info("question_graph_build: running Question Architect")
-    perspectives = ctx.session.state.get("app:perspectives", [])
-    scope = ctx.session.state.get("app:scope", {})
+    perspectives = get_state().get("app:perspectives", [])
+    scope = get_state().get("app:scope", {})
 
     from deep_research.agents.question_architect import question_architect
 
     result = await question_architect(perspectives, scope)
     questions = result.get("questions", [])
-    ctx.session.state["app:questions"] = questions
+    get_state()["app:questions"] = questions
     return {"question_count": len(questions), "message": f"Generated {len(questions)} questions"}
 
 
@@ -96,7 +98,7 @@ async def search_plan_create(ctx: Context, node_input: Any) -> dict[str, Any]:
     Takes the first pending question from session state and generates queries.
     """
     logger.info("search_plan_create: running Query Planner")
-    questions = ctx.session.state.get("app:questions", [])
+    questions = get_state().get("app:questions", [])
     if not questions:
         return {"query_count": 0, "message": "No questions to plan searches for"}
 
@@ -104,15 +106,15 @@ async def search_plan_create(ctx: Context, node_input: Any) -> dict[str, Any]:
     from deep_research.agents.query_planner import query_planner
 
     queries = await query_planner(question)
-    ctx.session.state["app:search_queries"] = queries
-    ctx.session.state["app:active_question"] = question
+    get_state()["app:search_queries"] = queries
+    get_state()["app:active_question"] = question
     return {"query_count": len(queries), "message": f"Generated {len(queries)} search queries"}
 
 
 async def source_retrieve(ctx: Context, node_input: Any) -> dict[str, Any]:
     """Retrieve sources using web search tool."""
     logger.info("source_retrieve: running web search")
-    queries = ctx.session.state.get("app:search_queries", [])
+    queries = get_state().get("app:search_queries", [])
     if not queries:
         return {"sources_found": 0, "message": "No queries to search"}
 
@@ -123,15 +125,15 @@ async def source_retrieve(ctx: Context, node_input: Any) -> dict[str, Any]:
         result = await web_search(q.get("raw_query", ""), max_results=3)
         all_results.extend(result.get("results", []))
 
-    ctx.session.state["app:sources"] = all_results
+    get_state()["app:sources"] = all_results
     return {"sources_found": len(all_results), "message": f"Retrieved {len(all_results)} sources"}
 
 
 async def evidence_extract(ctx: Context, node_input: Any) -> dict[str, Any]:
     """Extract evidence using Evidence Curator agent."""
     logger.info("evidence_extract: running Evidence Curator")
-    sources = ctx.session.state.get("app:sources", [])
-    question = ctx.session.state.get("app:active_question", {})
+    sources = get_state().get("app:sources", [])
+    question = get_state().get("app:active_question", {})
 
     if not sources:
         return {"fragments": 0, "message": "No sources to extract from"}
@@ -148,15 +150,15 @@ async def evidence_extract(ctx: Context, node_input: Any) -> dict[str, Any]:
             f["source_id"] = src.get("url", "unknown")
         all_fragments.extend(fragments)
 
-    ctx.session.state["app:evidence"] = all_fragments
+    get_state()["app:evidence"] = all_fragments
     return {"fragments": len(all_fragments), "message": f"Extracted {len(all_fragments)} evidence fragments"}
 
 
 async def claims_construct(ctx: Context, node_input: Any) -> dict[str, Any]:
     """Build claims using Claim Builder agent."""
     logger.info("claims_construct: running Claim Builder")
-    evidence = ctx.session.state.get("app:evidence", [])
-    question = ctx.session.state.get("app:active_question", {})
+    evidence = get_state().get("app:evidence", [])
+    question = get_state().get("app:active_question", {})
 
     if not evidence:
         return {"claims_created": 0, "message": "No evidence to build claims from"}
@@ -164,28 +166,28 @@ async def claims_construct(ctx: Context, node_input: Any) -> dict[str, Any]:
     from deep_research.agents.claim_builder import claim_builder
 
     claims = await claim_builder(evidence, question.get("text", ""))
-    ctx.session.state["app:claims"] = claims
+    get_state()["app:claims"] = claims
     return {"claims_created": len(claims), "message": f"Built {len(claims)} claims"}
 
 
 async def outline_build(ctx: Context, node_input: Any) -> dict[str, Any]:
     """Build report outline using Outline Architect agent."""
     logger.info("outline_build: running Outline Architect")
-    claims = ctx.session.state.get("app:claims", [])
-    objective = ctx.session.state.get("app:objective", {})
+    claims = get_state().get("app:claims", [])
+    objective = get_state().get("app:objective", {})
 
     from deep_research.agents.outline_architect import outline_architect
 
     outline = await outline_architect(claims, objective)
-    ctx.session.state["app:outline"] = outline
+    get_state()["app:outline"] = outline
     return {"section_count": len(outline.get("sections", [])), "message": f"Built outline with {len(outline.get('sections', []))} sections"}
 
 
 async def draft_generate(ctx: Context, node_input: Any) -> dict[str, Any]:
     """Generate section drafts using Section Writer agent."""
     logger.info("draft_generate: running Section Writer")
-    outline = ctx.session.state.get("app:outline", {})
-    claims = ctx.session.state.get("app:claims", [])
+    outline = get_state().get("app:outline", {})
+    claims = get_state().get("app:claims", [])
 
     if not outline.get("sections"):
         return {"sections_drafted": 0, "message": "No outline sections to draft"}
@@ -197,16 +199,16 @@ async def draft_generate(ctx: Context, node_input: Any) -> dict[str, Any]:
         draft = await section_writer(section, claims)
         drafts.append(draft)
 
-    ctx.session.state["app:drafts"] = drafts
+    get_state()["app:drafts"] = drafts
     return {"sections_drafted": len(drafts), "message": f"Drafted {len(drafts)} sections"}
 
 
 async def render_output(ctx: Context, node_input: Any) -> dict[str, Any]:
     """Render final report from drafts."""
     logger.info("render_output: assembling final report")
-    drafts = ctx.session.state.get("app:drafts", [])
-    objective = ctx.session.state.get("app:objective", {})
-    claims = ctx.session.state.get("app:claims", [])
+    drafts = get_state().get("app:drafts", [])
+    objective = get_state().get("app:objective", {})
+    claims = get_state().get("app:claims", [])
 
     # Build a simple markdown report
     title = objective.get("title", "Research Report")
@@ -224,7 +226,7 @@ async def render_output(ctx: Context, node_input: Any) -> dict[str, Any]:
     lines.append(f"- Sections drafted: {len(drafts)}")
 
     report = "\n".join(lines)
-    ctx.session.state["app:final_report"] = report
+    get_state()["app:final_report"] = report
     return {"output_format": "markdown", "report_length": len(report), "message": "Pipeline complete — report generated"}
 
 
@@ -237,13 +239,13 @@ async def scheduler_select(ctx: Context, node_input: Any) -> dict[str, Any]:
     return {"next_question_id": None, "message": "Scheduler stub"}
 
 async def source_policy_apply(ctx: Context, node_input: Any) -> dict[str, Any]:
-    return {"accepted": len(ctx.session.state.get("app:sources", [])), "rejected": 0, "message": "All sources accepted"}
+    return {"accepted": len(get_state().get("app:sources", [])), "rejected": 0, "message": "All sources accepted"}
 
 async def contradictions_search(ctx: Context, node_input: Any) -> dict[str, Any]:
     return {"contradictions_found": 0, "message": "Contradiction search stub"}
 
 async def coverage_calculate(ctx: Context, node_input: Any) -> dict[str, Any]:
-    claims = ctx.session.state.get("app:claims", [])
+    claims = get_state().get("app:claims", [])
     return {"primary_source_coverage": 0.5, "information_gain": 0.1, "claims_count": len(claims)}
 
 async def stop_evaluate(ctx: Context, node_input: Any) -> dict[str, Any]:
