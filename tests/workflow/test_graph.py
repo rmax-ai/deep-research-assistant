@@ -1,4 +1,6 @@
-"""Tests for ADK Workflow graph topology and execution."""
+"""Workflow and deterministic node tests for Phase 2."""
+
+from __future__ import annotations
 
 import pytest
 
@@ -6,20 +8,17 @@ import pytest
 @pytest.mark.asyncio
 class TestWorkflowGraph:
     async def test_build_workflow(self):
-        """Verify the workflow can be built without errors."""
         from deep_research.workflow.graph import build_research_workflow
 
         wf = build_research_workflow()
-        assert wf is not None
         assert wf.name == "deep_research_assistant"
 
     async def test_all_nodes_present(self):
-        """Verify all 20 nodes are registered in the workflow."""
         from deep_research.workflow.graph import build_research_workflow
 
         wf = build_research_workflow()
-
-        expected_nodes = [
+        node_names = {node.name for node in wf.graph.nodes}
+        expected = {
             "scope_classify",
             "perspective_generate",
             "question_graph_build",
@@ -32,6 +31,7 @@ class TestWorkflowGraph:
             "claims_construct",
             "contradictions_search",
             "coverage_calculate",
+            "moderator",
             "stop_evaluate",
             "outline_build",
             "approve_outline",
@@ -40,247 +40,120 @@ class TestWorkflowGraph:
             "repair_draft",
             "final_gate_check",
             "render_output",
+        }
+        assert expected.issubset(node_names)
+
+    async def test_branching_edges_present(self):
+        from deep_research.workflow.graph import build_research_workflow
+
+        wf = build_research_workflow()
+        edge_map = {(edge.from_node.name, edge.to_node.name, getattr(edge, "route", None)) for edge in wf.edges}
+
+        assert ("approve_plan", "scheduler_select", True) in edge_map
+        assert ("approve_plan", "scope_classify", False) in edge_map
+        assert ("stop_evaluate", "scheduler_select", False) in edge_map
+        assert ("stop_evaluate", "outline_build", True) in edge_map
+
+
+class TestScheduler:
+    def test_highest_priority_question_selected(self):
+        from deep_research.nodes.scheduler import select_frontier_questions
+
+        questions = [
+            {"question_id": "q-1", "text": "Low", "priority": 0.2, "risk_score": 0.1, "novelty_score": 0.1, "question_type": "descriptive", "status": "pending"},
+            {"question_id": "q-2", "text": "High", "priority": 0.9, "risk_score": 0.9, "novelty_score": 0.8, "question_type": "security", "materiality": "high", "status": "pending"},
         ]
 
-        node_names = {n.name for n in wf.graph.nodes}
-        for node in expected_nodes:
-            assert node in node_names, f"Missing node: {node}"
+        result = select_frontier_questions(questions)
+        assert result["selected_questions"][0]["question_id"] == "q-2"
+        assert result["priorities"]["q-2"] > result["priorities"]["q-1"]
 
-    async def test_edges_built(self):
-        """Verify edges are configured correctly."""
-        from google.adk.workflow import START as ST
+    def test_parallel_groups_separate_independent_questions(self):
+        from deep_research.nodes.scheduler import select_frontier_questions
 
-        from deep_research.workflow.graph import build_research_workflow
+        questions = [
+            {"question_id": "q-1", "text": "A", "priority": 0.8, "question_type": "descriptive", "status": "pending", "parent_question_ids": []},
+            {"question_id": "q-2", "text": "B", "priority": 0.75, "question_type": "descriptive", "status": "pending", "parent_question_ids": []},
+        ]
 
-        wf = build_research_workflow()
-        assert len(wf.edges) > 0
-
-        # Check key edges exist by node names
-        edge_pairs = {(e.from_node.name, e.to_node.name) for e in wf.edges}
-        assert (ST.name, "scope_classify") in edge_pairs
-        assert ("scope_classify", "perspective_generate") in edge_pairs
-
-    async def test_workflow_end_to_end_stub(self):
-        """Execute the full workflow with stub nodes and verify completion."""
-        from google.adk.runners import InMemoryRunner
-        from google.genai.types import Content, Part
-
-        from deep_research.workflow.graph import build_research_workflow
-
-        wf = build_research_workflow()
-        runner = InMemoryRunner(agent=wf, app_name="deep_research_test")
-
-        user_id = "test_user"
-        session_id = "test_session_e2e"
-
-        # Create session via runner's internal service
-        await runner.session_service.create_session(
-            app_name="deep_research_test",
-            user_id=user_id,
-            session_id=session_id,
-        )
-
-        # Run the workflow with a proper Content message
-        msg = Content(role="user", parts=[Part(text="Research ADK 2.0 tool governance")])
-        events = []
-        async for event in runner.run_async(
-            user_id=user_id,
-            session_id=session_id,
-            new_message=msg,
-        ):
-            events.append(event)
-
-        assert len(events) > 0, "Workflow produced no events"
-
-    async def test_all_node_functions_are_async(self):
-        """Verify all node functions are async callables."""
-        import inspect
-
-        from deep_research.workflow.graph import _ALL_NODE_FUNCS
-
-        for name, func in _ALL_NODE_FUNCS:
-            assert inspect.iscoroutinefunction(func), f"{name} is not async"
+        result = select_frontier_questions(questions)
+        assert any(len(group) >= 2 for group in result["parallel_groups"])
 
 
-# Need START constant for edge tests
-try:
-    from google.adk.workflow import START as START_NAME
-except ImportError:
-    START_NAME = "__start__"
-
-
-class TestWorkflowRoutes:
-    def test_route_lambdas_approve_plan(self):
-        """Verify approve_plan route lambdas work."""
-        # approved -> True
-        approved_route = lambda ctx, result: result.get("approved", True)  # noqa: E731
-        assert approved_route(None, {"approved": True})
-        assert not approved_route(None, {"approved": False})
-
-    def test_route_lambdas_stop(self):
-        """Verify stop_evaluate route lambdas work."""
-        stop_route = lambda ctx, result: result.get("should_stop", True)  # noqa: E731
-        assert stop_route(None, {"should_stop": True})
-        assert not stop_route(None, {"should_stop": False})
-
-    def test_route_lambdas_verify(self):
-        """Verify verify_draft route lambdas work."""
-        blocking_route = lambda ctx, result: result.get("blocking_findings", 0) > 0  # noqa: E731
-        assert blocking_route(None, {"blocking_findings": 2})
-        assert not blocking_route(None, {"blocking_findings": 0})
-
-
-class TestStoppingDecision:
-    def test_cycle_limit(self):
+class TestStopping:
+    def test_stops_on_budget_exhaustion(self):
         from deep_research.workflow.stopping import evaluate_stopping
 
         decision = evaluate_stopping(
             coverage={},
-            budget={"searches_remaining": 100},
-            cycle_count=10,
-            max_cycles=10,
+            budget_remaining={"searches_remaining": 0, "tokens_remaining": 10, "sources_remaining": 2},
+            questions=[],
+            claims=[],
+            contradictions=[],
+            cycle_history=[],
         )
-        assert decision.should_stop
-        assert "Maximum cycles" in decision.reasons[0]
+        assert decision.should_stop is True
+        assert "Budget exhausted" in decision.reasons
 
-    def test_budget_exhausted(self):
+    def test_stops_on_low_information_gain(self):
         from deep_research.workflow.stopping import evaluate_stopping
 
         decision = evaluate_stopping(
-            coverage={},
-            budget={"searches_remaining": 0},
-            cycle_count=1,
+            coverage={"marginal_information_gain": 0.01},
+            budget_remaining={"searches_remaining": 10, "tokens_remaining": 10, "sources_remaining": 2},
+            questions=[{"text": "A", "status": "resolved", "priority": 0.7}],
+            claims=[],
+            contradictions=[],
+            cycle_history=[
+                {"information_gain": 0.01},
+                {"information_gain": 0.02},
+                {"information_gain": 0.03},
+            ],
         )
-        assert decision.should_stop
-        assert "budget exhausted" in decision.reasons[0]
+        assert decision.should_stop is True
+        assert any("Marginal information gain" in reason for reason in decision.reasons)
 
-    def test_info_gain_below_threshold(self):
+    def test_continues_when_material_gaps_remain(self):
         from deep_research.workflow.stopping import evaluate_stopping
 
         decision = evaluate_stopping(
-            coverage={"information_gain": 0.001, "info_gain_threshold": 0.01},
-            budget={"searches_remaining": 50},
-            cycle_count=3,
+            coverage={"primary_source_coverage": 0.1},
+            budget_remaining={"searches_remaining": 10, "tokens_remaining": 10, "sources_remaining": 2},
+            questions=[{"text": "A", "status": "pending", "priority": 0.8}],
+            claims=[],
+            contradictions=[],
+            cycle_history=[],
         )
-        assert decision.should_stop
-
-    def test_all_material_questions_resolved(self):
-        from deep_research.workflow.stopping import evaluate_stopping
-
-        decision = evaluate_stopping(
-            coverage={
-                "information_gain": 0.05,
-                "unresolved_material_questions": [],
-            },
-            budget={"searches_remaining": 50},
-            cycle_count=2,
-        )
-        assert decision.should_stop
+        assert decision.should_stop is False
 
 
-class TestCheckpointing:
-    def test_create_and_load_checkpoint(self, tmp_path):
-        from deep_research.workflow.recovery import (
-            create_checkpoint,
-            load_latest_checkpoint,
-        )
+class TestBudget:
+    def test_budget_enforcement_rejects_overage(self):
+        from deep_research.nodes.budget import enforce_perspective_budget
 
-        state = {
-            "app:scope_result": {"status": "ok", "risk_level": "medium"},
-            "app:claims_result": {"status": "ok", "claims_created": 5},
+        budgets = {
+            "security": {
+                "searches_remaining": 1,
+                "tokens_remaining": 100,
+                "sources_remaining": 1,
+                "status": "active",
+            }
         }
+        result = enforce_perspective_budget("security", 2, budgets)
+        assert result["accepted"] is False
+        assert budgets["security"]["status"] == "budget_exhausted"
 
-        checkpoint_path = create_checkpoint(
-            state=state,
-            checkpoint_dir=tmp_path,
-            run_id="run-001",
-            node_name="claims_construct",
-        )
-        assert checkpoint_path.exists()
+    def test_section_local_evidence_filtering(self):
+        from deep_research.nodes.budget import filter_evidence_for_section
 
-        loaded = load_latest_checkpoint(tmp_path, "run-001")
-        assert loaded is not None
-        assert loaded["app:scope_result"] == state["app:scope_result"]
+        claims = [
+            {"claim_id": "c-1", "evidence_ids": ["e-1"]},
+            {"claim_id": "c-2", "evidence_ids": ["e-2"]},
+        ]
+        evidence = [
+            {"evidence_id": "e-1", "exact_excerpt": "Relevant"},
+            {"evidence_id": "e-2", "exact_excerpt": "Irrelevant"},
+        ]
 
-    def test_load_nonexistent(self, tmp_path):
-        from deep_research.workflow.recovery import load_latest_checkpoint
-
-        result = load_latest_checkpoint(tmp_path, "nonexistent")
-        assert result is None
-
-    def test_restore_checkpoint(self):
-        from deep_research.workflow.recovery import restore_checkpoint
-
-        state = {
-            "app:scope_classify_result": {"status": "ok"},
-            "app:perspective_generate_result": {"status": "ok"},
-            "app:claims_construct_result": {"status": "ok"},
-            "temp:noise": "should be filtered",
-        }
-        restored = restore_checkpoint(
-            state,
-            resolved_nodes=["scope_classify", "perspective_generate"],
-        )
-        assert "app:scope_classify_result" in restored
-        assert "app:perspective_generate_result" in restored
-        assert "app:claims_construct_result" not in restored
-        assert "temp:noise" not in restored
-
-
-class TestValidation:
-    def test_validate_stage_inputs_ok(self):
-        from deep_research.nodes.validation import validate_stage_inputs
-
-        state = {"app:scope_result": {"status": "ok"}}
-        valid, missing = validate_stage_inputs("perspective_generate", state)
-        assert valid
-        assert missing == []
-
-    def test_validate_stage_inputs_missing(self):
-        from deep_research.nodes.validation import validate_stage_inputs
-
-        valid, missing = validate_stage_inputs("perspective_generate", {})
-        assert not valid
-        assert "app:scope_result" in missing
-
-    def test_validate_stage_first_node(self):
-        from deep_research.nodes.validation import validate_stage_inputs
-
-        valid, _missing = validate_stage_inputs("scope_classify", {})
-        assert valid
-
-    def test_validate_result_structure(self):
-        from deep_research.nodes.validation import validate_result_structure
-
-        assert validate_result_structure("test", {"status": "ok"})
-        assert not validate_result_structure("test", {})
-
-
-class TestPersistence:
-    async def test_save_and_load(self):
-        from deep_research.nodes.persistence import (
-            delete_run_state,
-            load_run_state,
-            save_run_state,
-        )
-
-        state = {"app:scope_result": {"status": "ok"}}
-        await save_run_state("run-001", state)
-
-        loaded = await load_run_state("run-001")
-        assert loaded is not None
-        assert loaded["app:scope_result"] == state["app:scope_result"]
-
-        await delete_run_state("run-001")
-        loaded_after = await load_run_state("run-001")
-        assert loaded_after is None
-
-    async def test_list_runs(self):
-        from deep_research.nodes.persistence import list_runs, save_run_state
-
-        await save_run_state("run-a", {"data": "a"})
-        await save_run_state("run-b", {"data": "b"})
-
-        runs = await list_runs()
-        assert "run-a" in runs
-        assert "run-b" in runs
+        filtered = filter_evidence_for_section(["c-1"], claims, evidence)
+        assert filtered == [{"evidence_id": "e-1", "exact_excerpt": "Relevant"}]

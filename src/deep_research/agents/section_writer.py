@@ -8,9 +8,10 @@ NEVER introduces new substantive claims.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from deep_research.agents import generate_structured, is_llm_available, parse_json_response
+from deep_research.nodes.budget import filter_evidence_for_section
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ async def section_writer(
 
     claim_ids = section.get("claim_ids", [])
     section_claims = [claims[i] for i in claim_ids if i < len(claims)]
+    section_evidence = filter_evidence_for_section(claim_ids, claims, evidence or [])
 
     if not section_claims:
         return {
@@ -85,12 +87,21 @@ async def section_writer(
         f"Text: {c.get('text', '')}"
         for cid, c in zip(claim_ids, section_claims, strict=False)
     )
+    evidence_text = "\n\n".join(
+        f"[Evidence {index}] Source: {fragment.get('source_id', 'unknown')} | "
+        f"Type: {fragment.get('evidence_type', 'unknown')}\n"
+        f"Excerpt: {fragment.get('exact_excerpt', '')}"
+        for index, fragment in enumerate(section_evidence)
+    )
 
     prompt = f"""Section: {section.get('title', 'Untitled')}
 Purpose: {section.get('purpose', '')}
 
 Claims for this section:
 {claims_text}
+
+Relevant evidence for this section only:
+{evidence_text}
 
 Write the section prose from these claims."""
 
@@ -102,7 +113,7 @@ Write the section prose from these claims."""
             temperature=0.2,
             max_output_tokens=4096,
         )
-        result = parse_json_response(response, default={})
+        result = cast(dict[str, Any], parse_json_response(response, default={}))
         logger.info("section_writer: wrote section %r", section.get("title", "")[:60])
         return result
     except Exception as exc:

@@ -46,6 +46,8 @@ class BudgetConfig(BaseSettings):
 
     searches: int = 80
     opened_sources: int = 50
+    tokens: int = 120_000
+    sources_per_perspective: int = 12
     maximum_cost: float = 25.0
     maximum_wall_time_seconds: int = 1800
 
@@ -79,9 +81,49 @@ class WorkflowConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="DEEP_RESEARCH_WORKFLOW_")
 
     version: str = "1.0.0"
-    maximum_parallel_questions: int = 6
+    maximum_parallel_questions: int = 3
     checkpoint_after_each_batch: bool = True
     verification_repair_limit: int = 2
+    enable_iterative_research: bool = True
+    enable_follow_up_questions: bool = True
+    max_cycles: int = 10
+    low_information_gain_cycle_threshold: int = 3
+    information_gain_floor: float = 0.05
+
+
+class SchedulerConfig(BaseSettings):
+    """Priority weighting for research frontier scheduling."""
+
+    model_config = SettingsConfigDict(env_prefix="DEEP_RESEARCH_SCHEDULER_")
+
+    w_materiality: float = 0.3
+    w_risk: float = 0.2
+    w_dependency: float = 0.15
+    w_uncertainty: float = 0.2
+    w_novelty: float = 0.1
+    w_cost: float = 0.05
+
+
+class InformationGainConfig(BaseSettings):
+    """Weights for iterative information-gain scoring."""
+
+    model_config = SettingsConfigDict(env_prefix="DEEP_RESEARCH_INFORMATION_GAIN_")
+
+    alpha_novel_claims: float = 0.3
+    beta_novel_evidence: float = 0.25
+    gamma_resolved_gaps: float = 0.25
+    delta_resolved_contradictions: float = 0.15
+    lambda_duplication: float = 0.05
+
+
+class PerspectiveBudgetConfig(BaseSettings):
+    """Default per-perspective budget allocations."""
+
+    model_config = SettingsConfigDict(env_prefix="DEEP_RESEARCH_PERSPECTIVE_BUDGET_")
+
+    searches: int = 12
+    tokens: int = 18_000
+    sources: int = 8
 
 
 class SecurityConfig(BaseSettings):
@@ -129,6 +171,9 @@ class Settings(BaseSettings):
     # Sub-configurations
     models: ModelRoutingConfig = Field(default_factory=ModelRoutingConfig)
     workflow: WorkflowConfig = Field(default_factory=WorkflowConfig)
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
+    information_gain: InformationGainConfig = Field(default_factory=InformationGainConfig)
+    perspective_budget: PerspectiveBudgetConfig = Field(default_factory=PerspectiveBudgetConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
     research_policy: ResearchPolicyConfig = Field(default_factory=ResearchPolicyConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)

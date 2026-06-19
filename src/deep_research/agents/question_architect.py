@@ -71,6 +71,20 @@ Return ONLY a JSON object. No markdown, no explanation.
   ]
 }"""
 
+FOLLOW_UP_INSTRUCTION = """You are a Question Architect generating evidence-conditioned follow-up questions.
+Return ONLY a JSON object:
+{
+  "questions": [
+    {
+      "text": "string",
+      "question_type": "implementation|causal|descriptive|comparative|evidence-challenge|contradiction-resolution|security|failure-mode",
+      "parent_question_id": "string",
+      "priority": 0.0,
+      "rationale": "string"
+    }
+  ]
+}"""
+
 
 async def question_architect(
     perspectives: list[dict[str, Any]],
@@ -137,3 +151,101 @@ def _stub_questions(perspectives: list[dict[str, Any]]) -> dict[str, Any]:
             "novelty_score": 0.3,
         })
     return {"questions": questions}
+
+
+def _tokenize(text: str) -> set[str]:
+    return {
+        token.strip(" ,.:;!?()[]{}\"'")
+        for token in text.lower().split()
+        if len(token.strip(" ,.:;!?()[]{}\"'")) >= 4
+    }
+
+
+def _is_duplicate_question(text: str, existing_questions: list[dict[str, Any]]) -> bool:
+    candidate_tokens = _tokenize(text)
+    if not candidate_tokens:
+        return False
+    for question in existing_questions:
+        overlap = candidate_tokens & _tokenize(question.get("text", ""))
+        if len(overlap) >= min(4, len(candidate_tokens)):
+            return True
+    return False
+
+
+def _heuristic_follow_ups(
+    evidence: list[dict[str, Any]],
+    parent_question: dict[str, Any],
+    existing_questions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    follow_ups: list[dict[str, Any]] = []
+    parent_id = str(
+        parent_question.get("question_id")
+        or parent_question.get("id")
+        or parent_question.get("text", "parent-question")
+    )
+    parent_text = parent_question.get("text", "")
+
+    for fragment in evidence[:3]:
+        signal = (
+            fragment.get("normalized_statement")
+            or fragment.get("exact_excerpt")
+            or fragment.get("source_id")
+            or "the newly retrieved evidence"
+        )
+        source_hint = fragment.get("source_id") or fragment.get("title") or "this source"
+        text = f"What does the evidence from {source_hint} imply about {parent_text}: {signal[:90]}?"
+        if _is_duplicate_question(text, existing_questions + follow_ups):
+            continue
+        follow_ups.append({
+            "text": text,
+            "question_type": "evidence-challenge",
+            "parent_question_id": parent_id,
+            "priority": min(1.0, float(parent_question.get("priority", 0.5)) + 0.1),
+            "rationale": f"Follow up on specific evidence signal: {signal[:120]}",
+        })
+
+    return follow_ups
+
+
+async def generate_follow_ups(
+    evidence: list[dict[str, Any]],
+    parent_question: dict[str, Any],
+    existing_questions: list[dict[str, Any]],
+    model: str = "gemini-2.5-flash",
+) -> list[dict[str, Any]]:
+    """Generate evidence-conditioned follow-up questions."""
+    heuristic = _heuristic_follow_ups(evidence, parent_question, existing_questions)
+    if not is_llm_available():
+        return heuristic
+
+    prompt = (
+        f"Parent question: {parent_question}\n\n"
+        f"Existing questions: {existing_questions}\n\n"
+        f"Evidence: {evidence}"
+    )
+
+    try:
+        response = await generate_structured(
+            prompt=prompt,
+            model=model,
+            system_instruction=FOLLOW_UP_INSTRUCTION,
+            temperature=0.2,
+        )
+        result = parse_json_response(response, default={"questions": []})
+        raw_questions = result.get("questions", [])
+        follow_ups: list[dict[str, Any]] = []
+        parent_id = str(
+            parent_question.get("question_id")
+            or parent_question.get("id")
+            or parent_question.get("text", "parent-question")
+        )
+        for question in raw_questions:
+            text = question.get("text", "")
+            if not text or _is_duplicate_question(text, existing_questions + follow_ups):
+                continue
+            question["parent_question_id"] = parent_id
+            follow_ups.append(question)
+        return follow_ups or heuristic
+    except Exception as exc:
+        logger.error("generate_follow_ups failed: %s", exc)
+        return heuristic
