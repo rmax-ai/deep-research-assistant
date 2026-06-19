@@ -1,4 +1,4 @@
-"""Demo workflow tests for single-pass and iterative behavior."""
+"""Demo workflow tests for collaborative behavior."""
 
 from __future__ import annotations
 
@@ -7,7 +7,13 @@ from typing import Any
 import pytest
 
 
-async def _run_demo(monkeypatch: pytest.MonkeyPatch, *, iterative_enabled: bool) -> dict[str, Any]:
+async def _run_demo(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    iterative_enabled: bool,
+    mode: str = "review_first",
+    interventions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     from google.adk.runners import InMemoryRunner
     from google.genai.types import Content, Part
 
@@ -39,6 +45,17 @@ async def _run_demo(monkeypatch: pytest.MonkeyPatch, *, iterative_enabled: bool)
     monkeypatch.setattr(settings.workflow, "maximum_parallel_questions", 1)
 
     reset_state()
+    state = get_state()
+    state["app:run_id"] = "demo-run"
+    state["app:run_mode"] = mode
+    state["app:approval_inputs"] = {
+        "A": {"status": "approved"},
+        "B": {"status": "approved"},
+        "C": {"status": "approved"},
+        "D": {"status": "approved"},
+    }
+    state["app:pending_interventions"] = interventions or []
+
     wf = build_research_workflow()
     runner = InMemoryRunner(agent=wf, app_name="deep_research_demo")
     await runner.session_service.create_session(
@@ -55,13 +72,19 @@ async def _run_demo(monkeypatch: pytest.MonkeyPatch, *, iterative_enabled: bool)
     ):
         pass
 
-    state = get_state().copy()
+    snapshot = get_state().copy()
     reset_state()
-    return state
+    return snapshot
 
 
 @pytest.mark.asyncio
 class TestEndToEndDemo:
+    async def test_review_first_mode_records_all_four_gates(self, monkeypatch: pytest.MonkeyPatch):
+        state = await _run_demo(monkeypatch, iterative_enabled=False, mode="review_first")
+        approvals = state["app:approval_decisions"]
+        assert {"A", "B", "C", "D"}.issubset(set(approvals))
+        assert all(approvals[gate]["status"] in ("approved", "not_required") for gate in ("A", "B", "C", "D"))
+
     async def test_single_pass_mode_stays_single_cycle(self, monkeypatch: pytest.MonkeyPatch):
         state = await _run_demo(monkeypatch, iterative_enabled=False)
         assert len(state["app:cycle_history"]) == 1
@@ -71,7 +94,11 @@ class TestEndToEndDemo:
         state = await _run_demo(monkeypatch, iterative_enabled=True)
         assert len(state["app:cycle_history"]) >= 2
 
-    async def test_iterative_mode_produces_more_claims_than_single_pass(self, monkeypatch: pytest.MonkeyPatch):
-        single_pass_state = await _run_demo(monkeypatch, iterative_enabled=False)
-        iterative_state = await _run_demo(monkeypatch, iterative_enabled=True)
-        assert len(iterative_state["app:claims"]) > len(single_pass_state["app:claims"])
+    async def test_collaborative_mode_applies_user_intervention(self, monkeypatch: pytest.MonkeyPatch):
+        state = await _run_demo(
+            monkeypatch,
+            iterative_enabled=True,
+            mode="collaborative",
+            interventions=[{"type": "add_question", "instruction": "What are the audit tradeoffs?"}],
+        )
+        assert any(question["text"] == "What are the audit tradeoffs?" for question in state["app:questions"])

@@ -1,6 +1,8 @@
-"""Workflow and deterministic node tests for Phase 2."""
+"""Workflow and deterministic node tests for Phase 3."""
 
 from __future__ import annotations
+
+from types import SimpleNamespace
 
 import pytest
 
@@ -23,22 +25,28 @@ class TestWorkflowGraph:
             "perspective_generate",
             "question_graph_build",
             "approve_plan",
+            "plan_not_required",
             "scheduler_select",
             "search_plan_create",
             "source_retrieve",
             "source_policy_apply",
             "evidence_extract",
             "claims_construct",
+            "knowledge_organize",
             "contradictions_search",
             "coverage_calculate",
             "moderator",
+            "interventions_apply",
+            "scope_change_apply",
             "stop_evaluate",
             "outline_build",
             "approve_outline",
+            "outline_not_required",
             "draft_generate",
             "verify_draft",
             "repair_draft",
             "final_gate_check",
+            "publication_not_required",
             "render_output",
         }
         assert expected.issubset(node_names)
@@ -49,10 +57,79 @@ class TestWorkflowGraph:
         wf = build_research_workflow()
         edge_map = {(edge.from_node.name, edge.to_node.name, getattr(edge, "route", None)) for edge in wf.edges}
 
-        assert ("approve_plan", "scheduler_select", True) in edge_map
-        assert ("approve_plan", "scope_classify", False) in edge_map
-        assert ("stop_evaluate", "scheduler_select", False) in edge_map
-        assert ("stop_evaluate", "outline_build", True) in edge_map
+        assert ("approve_plan", "scope_classify", 0) in edge_map
+        assert ("approve_plan", "scheduler_select", 1) in edge_map
+        assert ("approve_plan", "plan_not_required", 2) in edge_map
+        assert ("plan_not_required", "scheduler_select", None) in edge_map
+        assert ("scope_change_apply", "question_graph_build", 1) in edge_map
+        assert ("stop_evaluate", "scheduler_select", 0) in edge_map
+        assert ("stop_evaluate", "outline_build", 1) in edge_map
+        assert ("approve_outline", "outline_build", 0) in edge_map
+        assert ("final_gate_check", "render_output", 1) in edge_map
+        assert ("final_gate_check", "publication_not_required", 2) in edge_map
+
+    async def test_approval_routing_uses_integer_routes(self):
+        from deep_research.workflow.graph import approve_plan
+        from deep_research.workflow.state import get_state, reset_state
+
+        reset_state()
+        state = get_state()
+        state.update(
+            {
+                "app:scope": {"risk_level": "high"},
+                "app:objective": {},
+                "app:research_plan": {"approval_recommendation": {"scope_approval_required": True}},
+                "app:approval_inputs": {"A": {"status": "approved"}, "B": {"status": "rejected"}},
+            }
+        )
+
+        ctx = SimpleNamespace(route=None)
+        result = await approve_plan(ctx, None)
+        assert ctx.route == 0
+        assert result["status"] == "rejected"
+
+    async def test_event_emission_in_nodes(self):
+        from deep_research.telemetry.events import get_event_bus
+        from deep_research.workflow.graph import render_output
+        from deep_research.workflow.state import get_state, reset_state
+
+        reset_state()
+        bus = get_event_bus()
+        bus.reset()
+        state = get_state()
+        state.update(
+            {
+                "app:run_id": "run-1",
+                "app:objective": {"title": "Demo"},
+                "app:drafts": [{"content": "Section body"}],
+                "app:claims": [],
+                "app:cycle_history": [],
+            }
+        )
+
+        await render_output(SimpleNamespace(route=None), None)
+        events = bus.get_events_since("run-1", None)
+        assert any(event["event_type"] == "run.completed" for event in events)
+
+    async def test_scope_change_mid_run_routes_back_to_question_graph(self):
+        from deep_research.workflow.graph import scope_change_apply
+        from deep_research.workflow.state import get_state, reset_state
+
+        reset_state()
+        state = get_state()
+        state.update(
+            {
+                "app:scope": {"included_topics": ["baseline"], "excluded_topics": []},
+                "app:research_plan": {"proposed_budget": {}},
+                "app:pending_scope_changes": [{"type": "add_topic", "topic": "security"}],
+            }
+        )
+
+        ctx = SimpleNamespace(route=None)
+        result = await scope_change_apply(ctx, None)
+        assert ctx.route == 1
+        assert result["applied"] == 1
+        assert "security" in get_state()["app:scope"]["included_topics"]
 
 
 class TestScheduler:

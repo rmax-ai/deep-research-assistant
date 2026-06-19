@@ -26,16 +26,18 @@ class TestModerator:
     async def test_detects_stagnation_after_three_low_novelty_cycles(self):
         from deep_research.agents.moderator import moderator
 
-        result = await moderator({
-            "questions": [],
-            "claims": [],
-            "contradictions": [],
-            "recent_cycle_history": [
-                {"novelty_score": 0.05},
-                {"novelty_score": 0.03},
-                {"novelty_score": 0.08},
-            ],
-        })
+        result = await moderator(
+            {
+                "questions": [],
+                "claims": [],
+                "contradictions": [],
+                "recent_cycle_history": [
+                    {"novelty_score": 0.05},
+                    {"novelty_score": 0.03},
+                    {"novelty_score": 0.08},
+                ],
+            }
+        )
 
         assert result["stagnation_detected"] is True
         assert any(action["type"] == "introduce_question_type" for action in result["rebalance_actions"])
@@ -44,14 +46,16 @@ class TestModerator:
     async def test_flags_missing_adversarial_evidence(self):
         from deep_research.agents.moderator import moderator
 
-        result = await moderator({
-            "questions": [],
-            "claims": [
-                {"claim_id": "c-1", "text": "Important claim", "materiality": "high"},
-            ],
-            "contradictions": [],
-            "recent_cycle_history": [],
-        })
+        result = await moderator(
+            {
+                "questions": [],
+                "claims": [
+                    {"claim_id": "c-1", "text": "Important claim", "materiality": "high"},
+                ],
+                "contradictions": [],
+                "recent_cycle_history": [],
+            }
+        )
 
         assert any(action["type"] == "add_counter_evidence" for action in result["rebalance_actions"])
 
@@ -66,12 +70,14 @@ class TestModerator:
             {"question_id": "q-4", "text": "D", "perspective": "skeptical", "priority": 0.5},
         ]
 
-        result = await moderator({
-            "questions": questions,
-            "claims": [],
-            "contradictions": [],
-            "recent_cycle_history": [],
-        })
+        result = await moderator(
+            {
+                "questions": questions,
+                "claims": [],
+                "contradictions": [],
+                "recent_cycle_history": [],
+            }
+        )
 
         assert any(action["type"] == "rebalance_perspective" for action in result["rebalance_actions"])
         assert result["adjusted_priorities"]["q-1"] < 0.7
@@ -110,6 +116,32 @@ class TestQuestionArchitect:
         )
 
         assert follow_ups == []
+
+
+class TestKnowledgeOrganizer:
+    @pytest.mark.asyncio
+    async def test_projects_topic_graph_from_questions_claims_and_evidence(self):
+        from deep_research.agents.knowledge_organizer import knowledge_organizer
+
+        concept_map = await knowledge_organizer(
+            questions=[
+                {"question_id": "q-1", "text": "How does approval work?", "perspective": "governance"},
+                {"question_id": "q-2", "text": "How are budgets enforced?", "perspective": "governance"},
+            ],
+            claims=[
+                {"claim_id": "c-1", "question_id": "q-1"},
+                {"claim_id": "c-2", "question_id": "q-2"},
+            ],
+            evidence=[
+                {"evidence_id": "e-1", "question_id": "q-1"},
+                {"evidence_id": "e-2", "question_id": "q-2"},
+            ],
+        )
+
+        assert concept_map["version"] == 1
+        assert any(node["type"] == "perspective" for node in concept_map["topic_nodes"])
+        assert any(node["type"] == "concept" and node["questions"] == ["q-1"] for node in concept_map["topic_nodes"])
+        assert any(edge["relation"] == "contains" for edge in concept_map["edges"])
 
 
 class TestAgentInit:

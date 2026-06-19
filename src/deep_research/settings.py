@@ -57,8 +57,9 @@ class ApprovalConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="DEEP_RESEARCH_APPROVALS_")
 
-    scope_required_for_risk: Literal["low", "medium", "high"] = "high"
-    outline_required_for_risk: Literal["low", "medium", "high"] = "high"
+    scope_required_for_risk: Literal["high", "medium", "all", "never"] = "high"
+    plan_required_for_risk: Literal["high", "medium", "all", "never"] = "high"
+    outline_required_for_risk: Literal["high", "medium", "all", "never"] = "high"
     publication_required_for_external: bool = True
 
 

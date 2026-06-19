@@ -1,20 +1,24 @@
-"""REST API for the Deep Research Assistant.
-
-Provides FastAPI endpoints for creating, inspecting, and exporting
-research runs. Uses ADK InMemoryRunner for local execution.
-"""
+"""REST API for the Deep Research Assistant."""
 
 from __future__ import annotations
 
+import asyncio
+import json
 import uuid
+from copy import deepcopy
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from google.adk.runners import InMemoryRunner
 from google.genai.types import Content, Part
 from pydantic import BaseModel, Field
 
+from deep_research.nodes.scope import apply_scope_change
+from deep_research.telemetry.events import get_event_bus
 from deep_research.workflow.graph import build_research_workflow
+from deep_research.workflow.state import get_state, reset_state
 
 app = FastAPI(
     title="Deep Research Assistant",
@@ -22,12 +26,8 @@ app = FastAPI(
     description="Enterprise-grade governed research runtime API",
 )
 
-# In-memory state for active runs
 _active_runs: dict[str, dict[str, Any]] = {}
 _workflow = build_research_workflow()
-
-
-# ── Request/Response models ────────────────────────────────────────────────
 
 
 class ObjectiveRequest(BaseModel):
@@ -57,13 +57,63 @@ class RunStatusResponse(BaseModel):
     report_preview: str | None = None
 
 
+class FrontierResponse(BaseModel):
+    run_id: str
+    version: int = 0
+    questions: list[dict[str, Any]] = Field(default_factory=list)
+    priorities: dict[str, float] = Field(default_factory=dict)
+
+
+class ProgressResponse(BaseModel):
+    run_id: str
+    phase: str
+    budget: dict[str, Any] = Field(default_factory=dict)
+    estimates: dict[str, Any] = Field(default_factory=dict)
+
+
 class InterventionRequest(BaseModel):
     type: str
     target_id: str | None = None
     instruction: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-# ── Endpoints ──────────────────────────────────────────────────────────────
+class ApprovalActionRequest(BaseModel):
+    decision: str
+    rationale: str = ""
+    approver_id: str = "api_user"
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _require_run(run_id: str) -> dict[str, Any]:
+    run_data = _active_runs.get(run_id)
+    if not run_data:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    return run_data
+
+
+def _sync_run_summary(run_data: dict[str, Any]) -> None:
+    state = run_data.get("state", {})
+    run_data["objective"] = state.get("app:objective", {})
+    run_data["scope"] = state.get("app:scope", {})
+    run_data["questions_count"] = len(state.get("app:questions", []))
+    run_data["claims_count"] = len(state.get("app:claims", []))
+    run_data["sources_count"] = len(state.get("app:sources", []))
+    run_data["report"] = state.get("app:final_report", run_data.get("report", ""))
+    run_data["phase"] = state.get("app:phase", run_data.get("phase", "completed"))
+
+
+def _default_approval_inputs(mode: str) -> dict[str, dict[str, str]]:
+    status = "approved" if mode in {"review_first", "collaborative"} else "approved"
+    return {
+        "A": {"status": status},
+        "B": {"status": status},
+        "C": {"status": status},
+        "D": {"status": status},
+    }
 
 
 @app.get("/health")
@@ -78,15 +128,24 @@ async def create_research_run(request: CreateRunRequest) -> RunStatusResponse:
     session_id = f"session_{run_id}"
     user_id = "api_user"
 
-    runner = InMemoryRunner(agent=_workflow, app_name="deep_research_api")
+    reset_state()
+    get_event_bus().reset()
+    state = get_state()
+    state["app:run_id"] = run_id
+    state["app:run_mode"] = request.mode
+    state["app:phase"] = "planning"
+    state["app:approval_inputs"] = deepcopy(
+        request.constraints.get("approval_inputs", _default_approval_inputs(request.mode))
+    )
+    state["app:pending_interventions"] = list(request.constraints.get("interventions", []))
 
+    runner = InMemoryRunner(agent=_workflow, app_name="deep_research_api")
     await runner.session_service.create_session(
         app_name="deep_research_api",
         user_id=user_id,
         session_id=session_id,
     )
 
-    # Build the user message
     objective_text = request.objective.primary_question
     if request.objective.decision_to_support:
         objective_text += f"\n\nDecision to support: {request.objective.decision_to_support}"
@@ -94,8 +153,6 @@ async def create_research_run(request: CreateRunRequest) -> RunStatusResponse:
         objective_text += f"\n\nAudience: {', '.join(request.objective.intended_audience)}"
 
     msg = Content(role="user", parts=[Part(text=objective_text)])
-
-    # Execute the workflow
     events = []
     async for event in runner.run_async(
         user_id=user_id,
@@ -104,25 +161,21 @@ async def create_research_run(request: CreateRunRequest) -> RunStatusResponse:
     ):
         events.append(event)
 
-    # Collect final state from pipeline
-    from deep_research.workflow.state import get_state, reset_state
-
-    final_state = get_state()
-
-    # Extract results
+    final_state = deepcopy(get_state())
     run_data = {
         "run_id": run_id,
         "session_id": session_id,
         "status": "completed",
-        "objective": final_state.get("app:objective", {}),
-        "scope": final_state.get("app:scope", {}),
-        "questions_count": len(final_state.get("app:questions", [])),
-        "claims_count": len(final_state.get("app:claims", [])),
-        "sources_count": len(final_state.get("app:sources", [])),
+        "phase": final_state.get("app:phase", "completed"),
         "report": final_state.get("app:final_report", ""),
         "event_count": len(events),
+        "events": get_event_bus().get_events_since(run_id, None),
+        "state": final_state,
+        "approvals": deepcopy(final_state.get("app:approval_decisions", {})),
+        "interventions": list(final_state.get("app:pending_interventions", [])),
+        "created_at": _now(),
     }
-
+    _sync_run_summary(run_data)
     _active_runs[run_id] = run_data
     reset_state()
 
@@ -141,10 +194,8 @@ async def create_research_run(request: CreateRunRequest) -> RunStatusResponse:
 @app.get("/v1/research-runs/{run_id}", response_model=RunStatusResponse)
 async def get_research_run(run_id: str) -> RunStatusResponse:
     """Get the current state of a research run."""
-    run_data = _active_runs.get(run_id)
-    if not run_data:
-        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
-
+    run_data = _require_run(run_id)
+    _sync_run_summary(run_data)
     return RunStatusResponse(
         run_id=run_data["run_id"],
         status=run_data["status"],
@@ -159,26 +210,131 @@ async def get_research_run(run_id: str) -> RunStatusResponse:
 
 @app.get("/v1/research-runs/{run_id}/graph")
 async def get_research_graph(run_id: str) -> dict[str, Any]:
-    """Get the research graph for a run (questions, claims, evidence)."""
-    run_data = _active_runs.get(run_id)
-    if not run_data:
-        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
-
+    """Get the research graph for a run."""
+    run_data = _require_run(run_id)
+    state = run_data.get("state", {})
     return {
         "run_id": run_id,
         "objective": run_data.get("objective"),
         "scope": run_data.get("scope"),
-        "claims": run_data.get("claims", []),
-        "sources": run_data.get("sources", []),
+        "claims": state.get("app:claims", []),
+        "sources": state.get("app:sources", []),
     }
 
 
-@app.post("/v1/research-runs/{run_id}/interventions")
-async def intervene(run_id: str, intervention: InterventionRequest) -> dict[str, str]:
-    """Submit a user intervention on a running investigation."""
-    if run_id not in _active_runs:
-        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+@app.get("/v1/research-runs/{run_id}/frontier", response_model=FrontierResponse)
+async def get_research_frontier(run_id: str) -> FrontierResponse:
+    """Return the live research frontier."""
+    run_data = _require_run(run_id)
+    state = run_data.get("state", {})
+    return FrontierResponse(
+        run_id=run_id,
+        version=int(state.get("app:questions_version", 0)),
+        questions=state.get("app:questions", []),
+        priorities=state.get("app:question_priorities", {}),
+    )
 
+
+@app.get("/v1/research-runs/{run_id}/progress", response_model=ProgressResponse)
+async def get_research_progress(run_id: str) -> ProgressResponse:
+    """Return phase and budget progress."""
+    run_data = _require_run(run_id)
+    state = run_data.get("state", {})
+    budget = {
+        "perspectives": state.get("app:perspective_budgets", {}),
+        "last_check": state.get("app:last_budget_check", {}),
+    }
+    estimates = {
+        "cycles_completed": len(state.get("app:cycle_history", [])),
+        "claims": len(state.get("app:claims", [])),
+        "sources": len(state.get("app:sources", [])),
+    }
+    return ProgressResponse(
+        run_id=run_id,
+        phase=state.get("app:phase", run_data.get("phase", "completed")),
+        budget=budget,
+        estimates=estimates,
+    )
+
+
+@app.get("/v1/research-runs/{run_id}/events")
+async def get_research_events(run_id: str, since: str | None = None) -> StreamingResponse:
+    """Stream or replay run events as server-sent events."""
+    _require_run(run_id)
+    bus = get_event_bus()
+    queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+    backlog = bus.get_events_since(run_id, since)
+
+    async def _enqueue(event: dict[str, Any]) -> None:
+        if event.get("run_id") == run_id:
+            await queue.put(event)
+
+    unsubscribe = bus.subscribe("*", _enqueue)
+    for event in backlog:
+        await queue.put(event)
+    await queue.put(None)
+
+    async def event_stream():
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield f"event: {item['event_type']}\ndata: {json.dumps(item)}\n\n"
+        finally:
+            unsubscribe()
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.get("/v1/research-runs/{run_id}/concept-map")
+async def get_concept_map(run_id: str) -> dict[str, Any]:
+    """Return the projected topic graph."""
+    run_data = _require_run(run_id)
+    return run_data.get("state", {}).get("app:concept_map", {"topic_nodes": [], "edges": [], "version": 0})
+
+
+@app.post("/v1/research-runs/{run_id}/interventions")
+async def intervene(run_id: str, intervention: InterventionRequest) -> dict[str, Any]:
+    """Submit a user intervention on a run."""
+    run_data = _require_run(run_id)
+    state = run_data.setdefault("state", {})
+    record = {
+        "type": intervention.type,
+        "target_id": intervention.target_id,
+        "instruction": intervention.instruction,
+        **intervention.metadata,
+    }
+    run_data.setdefault("interventions", []).append(record)
+
+    if intervention.type in {"add_topic", "remove_topic", "add_perspective", "change_budget"}:
+        updated = await apply_scope_change(state, record)
+        state.clear()
+        state.update(updated)
+    elif intervention.type == "add_question":
+        questions = state.setdefault("app:questions", [])
+        next_index = len(questions)
+        questions.append(
+            {
+                "question_id": f"q-user-{next_index}",
+                "text": intervention.instruction,
+                "priority": 1.0,
+                "status": "pending",
+                "perspective": "user_requested",
+            }
+        )
+        state["app:questions_version"] = int(state.get("app:questions_version", 0)) + 1
+    elif intervention.type == "challenge_claim":
+        state.setdefault("app:contradictions", []).append(
+            {
+                "contradiction_id": f"ctr-api-{intervention.target_id or len(state.get('app:contradictions', []))}",
+                "claim_ids": [intervention.target_id] if intervention.target_id else [],
+                "resolution_status": "challenged",
+                "instruction": intervention.instruction,
+            }
+        )
+
+    _sync_run_summary(run_data)
     return {
         "status": "recorded",
         "run_id": run_id,
@@ -187,13 +343,32 @@ async def intervene(run_id: str, intervention: InterventionRequest) -> dict[str,
     }
 
 
+@app.post("/v1/research-runs/{run_id}/approvals/{approval_id}")
+async def submit_approval(run_id: str, approval_id: str, request: ApprovalActionRequest) -> dict[str, Any]:
+    """Approve or reject a collaboration gate."""
+    run_data = _require_run(run_id)
+    state = run_data.setdefault("state", {})
+    decisions = state.setdefault("app:approval_decisions", {})
+    decision = decisions.setdefault(approval_id, {"gate": approval_id, "required": True, "display_data": {}})
+    decision["status"] = request.decision
+    decision["rationale"] = request.rationale
+    decision["approver_id"] = request.approver_id
+    decision["decided_at"] = _now()
+    state.setdefault("app:approval_inputs", {})[approval_id] = {"status": request.decision}
+    run_data.setdefault("approvals", {})[approval_id] = decision
+
+    return {
+        "run_id": run_id,
+        "approval_id": approval_id,
+        "status": request.decision,
+        "rationale": request.rationale,
+    }
+
+
 @app.post("/v1/research-runs/{run_id}/exports")
 async def export_report(run_id: str, format: str = "markdown") -> dict[str, Any]:
     """Export the final report in the requested format."""
-    run_data = _active_runs.get(run_id)
-    if not run_data:
-        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
-
+    run_data = _require_run(run_id)
     report = run_data.get("report", "")
     if not report:
         return {
