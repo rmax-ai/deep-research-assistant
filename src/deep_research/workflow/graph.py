@@ -314,16 +314,74 @@ async def source_retrieve(ctx: Context, node_input: Any) -> dict[str, Any]:
 
 
 async def source_policy_apply(ctx: Context, node_input: Any) -> dict[str, Any]:
-    """Source policy stub kept for a later phase."""
+    """Real source policy: classify, filter, and deduplicate sources."""
     state = get_state()
-    latest_sources = state.get("app:latest_sources", [])
+    sources = state.get("app:latest_sources", [])
+
+    if not sources:
+        return {"accepted": 0, "rejected": 0, "message": "No sources to filter"}
+
+    from deep_research.nodes.deduplication import cluster_sources, deduplicate_sources
+    from deep_research.policies.identity import get_current_principal
+    from deep_research.policies.engine import evaluate_policy
+
+    principal = get_current_principal(state)
+
+    # Deduplicate by URL/title
+    unique = deduplicate_sources(sources)
+    deduped_count = len(sources) - len(unique)
+    sources = unique
+
+    # Classify and filter
+    accepted = []
+    rejected = []
+    for src in sources:
+        # Check policy for source retrieval
+        decision = evaluate_policy(
+            principal,
+            action="source_retrieve",
+            resource=str(src.get("canonical_uri", src.get("url", ""))),
+            context={"stage": state.get("app:phase", "")},
+        )
+        if decision.value == "deny":
+            rejected.append({**src, "rejection_reason": "policy_deny"})
+            continue
+
+        # Simple heuristics for source quality
+        url = str(src.get("canonical_uri", src.get("url", "")))
+        title = str(src.get("title", ""))
+
+        # Apply source constraints from scope
+        scope = state.get("app:scope", {})
+        source_constraints = scope.get("source_constraints", {})
+        blocked = source_constraints.get("blocked_domains", [])
+        if any(d in url for d in blocked):
+            rejected.append({**src, "rejection_reason": "blocked_domain"})
+            continue
+
+        src["policy_status"] = "accepted"
+        accepted.append(src)
+
+    # Assign independence clusters
+    accepted = cluster_sources(accepted)
+
+    state["app:sources"] = list(state.get("app:sources", [])) + accepted
+    state["app:rejected_sources"] = rejected
+
     await _publish(
         "source.accepted",
         run_id=_run_id(state),
-        sources=latest_sources,
-        accepted=len(latest_sources),
+        sources=accepted,
+        accepted=len(accepted),
+        rejected=len(rejected),
     )
-    return {"accepted": len(latest_sources), "rejected": 0, "message": "All sources accepted"}
+
+    return {
+        "accepted": len(accepted),
+        "rejected": len(rejected) + deduped_count,
+        "deduplicated": deduped_count,
+        "message": f"Accepted {len(accepted)}, rejected {len(rejected)}, deduplicated {deduped_count}",
+    }
 
 
 async def evidence_extract(ctx: Context, node_input: Any) -> dict[str, Any]:
