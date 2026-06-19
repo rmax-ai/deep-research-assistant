@@ -1,0 +1,197 @@
+{
+  ".svelte-kit/generated/server/internal.js": {
+    "file": "internal.js",
+    "name": "internal",
+    "src": ".svelte-kit/generated/server/internal.js",
+    "isEntry": true,
+    "imports": [
+      "_root.js",
+      "_internal.js",
+      "_server.js",
+      "_internal2.js"
+    ]
+  },
+  "_DocLayout.js": {
+    "file": "chunks/DocLayout.js",
+    "name": "DocLayout",
+    "css": [
+      "_app/immutable/assets/DocLayout.Cl-s02hg.css"
+    ]
+  },
+  "_exports.js": {
+    "file": "chunks/exports.js",
+    "name": "exports",
+    "imports": [
+      "_index.js",
+      "_root.js"
+    ]
+  },
+  "_false.js": {
+    "file": "chunks/false.js",
+    "name": "false"
+  },
+  "_html.js": {
+    "file": "chunks/html.js",
+    "name": "html"
+  },
+  "_index.js": {
+    "file": "chunks/index.js",
+    "name": "index"
+  },
+  "_internal.js": {
+    "file": "chunks/internal.js",
+    "name": "internal"
+  },
+  "_internal2.js": {
+    "file": "chunks/internal2.js",
+    "name": "internal",
+    "imports": [
+      "_root.js",
+      "_internal.js",
+      "_server.js"
+    ]
+  },
+  "_root.js": {
+    "file": "chunks/root.js",
+    "name": "root",
+    "imports": [
+      "_index.js",
+      "_false.js"
+    ]
+  },
+  "_server.js": {
+    "file": "chunks/server.js",
+    "name": "server"
+  },
+  "_url.js": {
+    "file": "chunks/url.js",
+    "name": "url"
+  },
+  "_utils.js": {
+    "file": "chunks/utils.js",
+    "name": "utils",
+    "imports": [
+      "_utils2.js"
+    ]
+  },
+  "_utils2.js": {
+    "file": "chunks/utils2.js",
+    "name": "utils"
+  },
+  "node_modules/@sveltejs/kit/src/runtime/app/server/remote/index.js": {
+    "file": "remote-entry.js",
+    "name": "remote-entry",
+    "src": "node_modules/@sveltejs/kit/src/runtime/app/server/remote/index.js",
+    "isEntry": true,
+    "imports": [
+      "_utils.js",
+      "_false.js",
+      "_server.js",
+      "_internal.js"
+    ]
+  },
+  "node_modules/@sveltejs/kit/src/runtime/components/svelte-5/error.svelte": {
+    "file": "entries/fallbacks/error.svelte.js",
+    "name": "entries/fallbacks/error.svelte",
+    "src": "node_modules/@sveltejs/kit/src/runtime/components/svelte-5/error.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_url.js",
+      "_root.js",
+      "_utils2.js",
+      "_exports.js"
+    ]
+  },
+  "node_modules/@sveltejs/kit/src/runtime/server/index.js": {
+    "file": "index.js",
+    "name": "index",
+    "src": "node_modules/@sveltejs/kit/src/runtime/server/index.js",
+    "isEntry": true,
+    "imports": [
+      "_utils.js",
+      "_false.js",
+      "_server.js",
+      "_url.js",
+      "_utils2.js",
+      "_exports.js",
+      "_internal2.js"
+    ]
+  },
+  "src/routes/+layout.js": {
+    "file": "entries/pages/_layout.js",
+    "name": "entries/pages/_layout",
+    "src": "src/routes/+layout.js",
+    "isEntry": true
+  },
+  "src/routes/+layout.svelte": {
+    "file": "entries/pages/_layout.svelte.js",
+    "name": "entries/pages/_layout.svelte",
+    "src": "src/routes/+layout.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_server.js",
+      "_url.js",
+      "_root.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_layout.9K0aq08O.css"
+    ]
+  },
+  "src/routes/+page.svx": {
+    "file": "entries/pages/_page.svx.js",
+    "name": "entries/pages/_page.svx",
+    "src": "src/routes/+page.svx",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_DocLayout.js",
+      "_server.js",
+      "_url.js",
+      "_root.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_page.CiyNPjHK.css"
+    ]
+  },
+  "src/routes/api/+page.svx": {
+    "file": "entries/pages/api/_page.svx.js",
+    "name": "entries/pages/api/_page.svx",
+    "src": "src/routes/api/+page.svx",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_DocLayout.js",
+      "_html.js"
+    ]
+  },
+  "src/routes/architecture/+page.svx": {
+    "file": "entries/pages/architecture/_page.svx.js",
+    "name": "entries/pages/architecture/_page.svx",
+    "src": "src/routes/architecture/+page.svx",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_DocLayout.js",
+      "_html.js"
+    ]
+  },
+  "src/routes/phases/+page.svx": {
+    "file": "entries/pages/phases/_page.svx.js",
+    "name": "entries/pages/phases/_page.svx",
+    "src": "src/routes/phases/+page.svx",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_DocLayout.js",
+      "_html.js"
+    ]
+  },
+  "virtual:__sveltekit/env": {
+    "file": "env.js",
+    "name": "env",
+    "src": "virtual:__sveltekit/env",
+    "isEntry": true
+  }
+}

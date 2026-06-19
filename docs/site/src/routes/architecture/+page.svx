@@ -1,0 +1,121 @@
+---
+title: Architecture
+description: System architecture of the Deep Research Assistant
+---
+
+# Architecture
+
+## Overview
+
+The Deep Research Assistant is a governed AI research runtime built on **Google ADK 2.0**. It implements a staged epistemic pipeline: intent → scope → research perspectives → question graph → search plans → retrieved sources → evidence extraction → claim construction → contradiction analysis → coverage analysis → outline → section drafts → independent verification → approval → final report.
+
+Unlike monolithic chatbot approaches, the system's fundamental unit of quality is a **supported, qualified, and traceable claim** — not a polished paragraph.
+
+## Workflow Topology
+
+The workflow is a 30-node ADK 2.0 `Workflow` graph with branching edges for approval gates, iterative loops, and repair cycles.
+
+```
+START
+  → scope_classify (Research Director)
+  → perspective_generate (Perspective Planner)
+  → question_graph_build (Question Architect)
+  → approve_plan [Gate A] ←→ scope_classify (reject)
+  → scheduler_select (Frontier Scheduler)
+  → search_plan_create (Query Planner)
+  → source_retrieve (Web Search)
+  → source_policy_apply (Dedup + Classify + Filter)
+  → evidence_extract (Evidence Curator)
+  → claims_construct (Claim Builder)
+  → knowledge_organize (Knowledge Organizer)
+  → contradictions_search (Counter-Evidence Agent)
+  → coverage_calculate (Info-Gain Metrics)
+  → moderator (Research Moderator)
+  → interventions_apply (User Interventions)
+  → stop_evaluate ←→ scheduler_select (continue loop)
+  → outline_build (Outline Architect)
+  → approve_outline [Gate C] ←→ outline_build (reject)
+  → draft_generate (Section Writer)
+  → verify_draft (Verification Agent)
+  → repair_draft ←→ verify_draft (repair loop)
+  → final_gate_check [Gate D]
+  → render_output
+```
+
+## Component Architecture
+
+### Agent Roster (14 LLM Agents)
+
+| Agent | Responsibility | Model |
+|-------|---------------|-------|
+| Research Director | Scope interpretation, mode selection | gemini-2.5-flash |
+| Perspective Planner | Generate research lenses, budget allocation | gemini-2.5-flash |
+| Question Architect | Question graph generation, follow-ups | gemini-2.5-flash |
+| Research Moderator | Stagnation detection, frontier rebalancing | gemini-2.5-flash |
+| Query Planner | Search query decomposition (10 strategies) | gemini-2.5-flash |
+| Source Appraiser | Claim-relative source authority assessment | gemini-2.5-flash |
+| Evidence Curator | Exact excerpt extraction, qualifier preservation | gemini-2.5-flash |
+| Claim Builder | Atomic claim construction, epistemic status | gemini-2.5-flash |
+| Counter-Evidence Agent | Contradiction search, independence checks | gemini-2.5-flash |
+| Knowledge Organizer | Conceptual hierarchy, concept map projection | gemini-2.5-flash |
+| Outline Architect | Report structure from validated claims | gemini-2.5-flash |
+| Section Writer | Prose from claims only, blocked-if-missing | gemini-2.5-flash |
+| Verification Agent | Citation entailment, cross-section consistency | gemini-2.5-flash |
+| Executive Synthesizer | Concise executive synthesis | gemini-2.5-flash |
+
+### Deterministic Nodes (16 FunctionNodes)
+
+| Node | Responsibility |
+|------|---------------|
+| scheduler_select | Priority-based frontier selection |
+| source_policy_apply | Deduplication, classification, domain filtering |
+| coverage_calculate | Information-gain metrics (IG_t formula) |
+| stop_evaluate | Multi-condition stopping (budget, coverage, IG, deadlines) |
+| contradictions_search | Claim pair comparison, resolution tracking |
+| confidence_score | Authority × independence × freshness × corroboration |
+| cluster_sources | Publisher/domain independence clustering |
+| verify_draft_citations | Keyword-overlap entailment heuristics |
+| repair_loop | Max 2 repair passes for blocking findings |
+| budget_track | Perspective-level budget enforcement |
+| scope_change_apply | Mid-run topic/perspective modifications |
+
+## Data Model
+
+### Core Entities
+
+```
+ResearchRun
+├── ResearchObjective (title, primary_question, decision_to_support)
+├── ResearchScope (included/excluded topics, constraints, risk_level)
+├── Perspective[] (name, purpose, required_questions, budget_weight)
+├── ResearchQuestion[] (text, type, priority, parent/child edges)
+├── SearchPlan[] (queries, source mix, stop conditions)
+├── SourceRecord[] (canonical_uri, authority_class, independence_cluster)
+├── EvidenceFragment[] (exact_excerpt, normalized_statement, confidence)
+├── Claim[] (text, atomic_form, epistemic_status, evidence_ids)
+├── Contradiction[] (claim_ids, type, resolution_status)
+├── OutlineSection[] (title, required_claim_ids, minimum_evidence)
+├── SectionDraft[] (content, cited_claim_ids)
+├── VerificationFinding[] (type, severity, claim_id)
+├── ApprovalDecision[] (gate, status, decided_at)
+└── ResearchMetrics (coverage, confidence, cost, latency)
+```
+
+## Trust Boundaries
+
+1. **User → API**: OAuth / API key authentication
+2. **API → Workflow**: Run-scoped identity propagation
+3. **Agent → Tools**: Policy engine evaluates `{principal, action, stage, risk}` → `{allow, deny, confirm}`
+4. **Evidence → Claims**: Data/instruction channel separation (prompt injection defense)
+5. **Claims → Report**: Citation entailment verification before rendering
+6. **Report → Publication**: Approval Gate D for external distribution
+
+## Model Routing
+
+| Tier | Use | Model |
+|------|-----|-------|
+| Fast | Query expansion, classification, extraction | gemini-2.5-flash |
+| Reasoning | Scope, questions, claims, contradictions | gemini-2.5-pro |
+| Verification | Citation entailment, causal overreach | gemini-2.5-flash (distinct prompt) |
+
+The verifier uses a distinct system prompt and lower temperature from the section writer to enforce the independence rule.

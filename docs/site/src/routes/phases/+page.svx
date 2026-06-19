@@ -1,0 +1,108 @@
+---
+title: Implementation Phases
+description: Build phases and roadmap for the Deep Research Assistant
+---
+
+# Implementation Phases
+
+All 7 phases are complete — 46 stories across 7 epics.
+
+## Phase Summary
+
+| Phase | Stories | Lines Changed | Key Deliverables |
+|-------|---------|---------------|------------------|
+| 0: Architecture Spike | 4 | — | ADK 2.0 workflow skeleton, 20 nodes, schemas, end-to-end demo |
+| 1: Evidence-First MVP | 8 | — | 7 agents, REST API, citations, claim-evidence traceability |
+| 2: STORM-Grade Iterative | 6 | +1,406/-675 | Moderator, scheduler, stopping conditions, info-gain metrics |
+| 3: Co-STORM Collaboration | 8 | +1,197/-144 | Events, approvals, interventions, concept map, knowledge organizer |
+| 4: Epistemic Reliability | 6 | +1,167/-35 | Counter-evidence, contradictions, confidence, verification |
+| 5: Enterprise Governance | 8 | +336/-5 | Identity, policy engine, audit log, source classification |
+| 6: Continuous Research | 6 | +389 | Watch mode, skill registry, knowledge publishing |
+
+## Phase 0: Architecture Spike
+
+**Exit criterion:** A research run can be interrupted and resumed without duplicating completed stages.
+
+- 20-node ADK 2.0 Workflow graph (sequential)
+- Source and claim data schemas (14 Pydantic v2 models)
+- Session persistence
+- Event streaming infrastructure
+- Web search tool integration
+
+## Phase 1: Evidence-First MVP
+
+**Exit criteria:** All substantive report claims map to claim records. All source-derived claims map to evidence.
+
+- Research Director, Perspective Planner, Question Architect
+- Query Planner with 10 search strategies
+- Evidence Curator with exact excerpt preservation
+- Claim Builder with atomic claims and epistemic status
+- Outline Architect and Section Writer
+- Citation linking: report → claim → evidence → source
+- REST API: create, inspect, export research runs
+
+## Phase 2: STORM-Grade Iterative Research
+
+**Exit criterion:** Compute-matched evaluation demonstrates better coverage than one-shot RAG.
+
+- Research Moderator Agent: stagnation detection, rebalancing
+- Evidence-conditioned follow-up question generation
+- Frontier scheduler with priority function: Priority = w_m·M + w_r·R + w_d·D + w_u·U + w_n·N − w_c·C
+- Iterative stopping conditions: budget, coverage, info gain
+- Perspective budget allocation
+- Information-gain metrics: IG_t = α·N_c + β·N_e + γ·N_k + δ·C_r − λ·D
+
+## Phase 3: Co-STORM-Style Collaboration
+
+**Exit criterion:** Users can steer a running investigation without corrupting workflow state.
+
+- Streaming event infrastructure (16 event types)
+- Live research frontier API
+- User intervention API: add_question, challenge_claim, exclude_source, increase_depth
+- Approval gates A/B/C/D with configurable triggers
+- Knowledge Organizer Agent + concept map projection
+- Mid-run scope changes
+
+## Phase 4: Epistemic Reliability
+
+<p><strong>Exit criterion:</strong> Material unsupported-inference rate meets production threshold (&lt;5%).</p>
+
+- Counter-Evidence Agent: contradiction search, independence checks
+- Contradiction detection and resolution tracking
+- Source independence clustering (deterministic)
+- Confidence model: authority × independence × freshness × corroboration
+- Verification Agent with independent prompt from writer
+- Citation entailment with keyword overlap heuristics
+- Cross-section consistency checks
+
+## Phase 5: Enterprise Governance
+
+**Exit criterion:** Security, authorization, and audit release gates pass.
+
+- Identity engine: principal context propagation through all nodes
+- Policy engine: role-to-tool allowlists, stage-based tool reduction
+- Real source policy: deduplication, classification, domain filtering
+- Immutable audit log with chain verification
+- Prompt injection defenses
+
+## Phase 6: Continuous Research and Reusable SOPs
+
+**Exit criterion:** A saved research workflow can update prior findings without rebuilding blindly.
+
+- Continuous watch mode with delta detection
+- Source content change detection + claim invalidation cascade
+- Research Skill Registry with progressive disclosure
+- 5 domain templates: architecture analysis, security, standards, vendor validation, executive briefs
+- Knowledge-layer publishing: validated claims → long-term memory
+
+## Dependency Graph
+
+```
+Phase 0 ──► Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 5 ──► Phase 6
+                         │            │            │
+                         └──► Phase 4 ─┘────────────┘
+```
+
+- Phase 4 depends on Phase 2 (needs iterative loop)
+- Phase 5 depends on Phase 3 (approval center) and Phase 4 (verification)
+- Phase 6 depends on Phase 5 (governance + audit)

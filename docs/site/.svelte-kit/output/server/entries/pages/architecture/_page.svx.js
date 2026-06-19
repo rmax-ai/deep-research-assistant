@@ -1,0 +1,62 @@
+import { s as sanitize_props, b as spread_props } from "../../../chunks/index.js";
+import { D as DocLayout } from "../../../chunks/DocLayout.js";
+import { h as html } from "../../../chunks/html.js";
+const metadata = {
+  "title": "Architecture",
+  "description": "System architecture of the Deep Research Assistant"
+};
+const { title, description } = metadata;
+function _page_svx($$renderer, $$props) {
+  const $$sanitized_props = sanitize_props($$props);
+  DocLayout($$renderer, spread_props([
+    $$sanitized_props,
+    metadata,
+    {
+      children: ($$renderer2) => {
+        $$renderer2.push(`<h1>Architecture</h1> <h2>Overview</h2> <p>The Deep Research Assistant is a governed AI research runtime built on <strong>Google ADK 2.0</strong>. It implements a staged epistemic pipeline: intent → scope → research perspectives → question graph → search plans → retrieved sources → evidence extraction → claim construction → contradiction analysis → coverage analysis → outline → section drafts → independent verification → approval → final report.</p> <p>Unlike monolithic chatbot approaches, the system’s fundamental unit of quality is a <strong>supported, qualified, and traceable claim</strong> — not a polished paragraph.</p> <h2>Workflow Topology</h2> <p>The workflow is a 30-node ADK 2.0 <code>Workflow</code> graph with branching edges for approval gates, iterative loops, and repair cycles.</p> <pre class="language-undefined">${html(`<code class="language-undefined">START
+  → scope_classify (Research Director)
+  → perspective_generate (Perspective Planner)
+  → question_graph_build (Question Architect)
+  → approve_plan [Gate A] ←→ scope_classify (reject)
+  → scheduler_select (Frontier Scheduler)
+  → search_plan_create (Query Planner)
+  → source_retrieve (Web Search)
+  → source_policy_apply (Dedup + Classify + Filter)
+  → evidence_extract (Evidence Curator)
+  → claims_construct (Claim Builder)
+  → knowledge_organize (Knowledge Organizer)
+  → contradictions_search (Counter-Evidence Agent)
+  → coverage_calculate (Info-Gain Metrics)
+  → moderator (Research Moderator)
+  → interventions_apply (User Interventions)
+  → stop_evaluate ←→ scheduler_select (continue loop)
+  → outline_build (Outline Architect)
+  → approve_outline [Gate C] ←→ outline_build (reject)
+  → draft_generate (Section Writer)
+  → verify_draft (Verification Agent)
+  → repair_draft ←→ verify_draft (repair loop)
+  → final_gate_check [Gate D]
+  → render_output</code>`)}</pre> <h2>Component Architecture</h2> <h3>Agent Roster (14 LLM Agents)</h3> <table><thead><tr><th>Agent</th><th>Responsibility</th><th>Model</th></tr></thead><tbody><tr><td>Research Director</td><td>Scope interpretation, mode selection</td><td>gemini-2.5-flash</td></tr><tr><td>Perspective Planner</td><td>Generate research lenses, budget allocation</td><td>gemini-2.5-flash</td></tr><tr><td>Question Architect</td><td>Question graph generation, follow-ups</td><td>gemini-2.5-flash</td></tr><tr><td>Research Moderator</td><td>Stagnation detection, frontier rebalancing</td><td>gemini-2.5-flash</td></tr><tr><td>Query Planner</td><td>Search query decomposition (10 strategies)</td><td>gemini-2.5-flash</td></tr><tr><td>Source Appraiser</td><td>Claim-relative source authority assessment</td><td>gemini-2.5-flash</td></tr><tr><td>Evidence Curator</td><td>Exact excerpt extraction, qualifier preservation</td><td>gemini-2.5-flash</td></tr><tr><td>Claim Builder</td><td>Atomic claim construction, epistemic status</td><td>gemini-2.5-flash</td></tr><tr><td>Counter-Evidence Agent</td><td>Contradiction search, independence checks</td><td>gemini-2.5-flash</td></tr><tr><td>Knowledge Organizer</td><td>Conceptual hierarchy, concept map projection</td><td>gemini-2.5-flash</td></tr><tr><td>Outline Architect</td><td>Report structure from validated claims</td><td>gemini-2.5-flash</td></tr><tr><td>Section Writer</td><td>Prose from claims only, blocked-if-missing</td><td>gemini-2.5-flash</td></tr><tr><td>Verification Agent</td><td>Citation entailment, cross-section consistency</td><td>gemini-2.5-flash</td></tr><tr><td>Executive Synthesizer</td><td>Concise executive synthesis</td><td>gemini-2.5-flash</td></tr></tbody></table> <h3>Deterministic Nodes (16 FunctionNodes)</h3> <table><thead><tr><th>Node</th><th>Responsibility</th></tr></thead><tbody><tr><td>scheduler_select</td><td>Priority-based frontier selection</td></tr><tr><td>source_policy_apply</td><td>Deduplication, classification, domain filtering</td></tr><tr><td>coverage_calculate</td><td>Information-gain metrics (IG_t formula)</td></tr><tr><td>stop_evaluate</td><td>Multi-condition stopping (budget, coverage, IG, deadlines)</td></tr><tr><td>contradictions_search</td><td>Claim pair comparison, resolution tracking</td></tr><tr><td>confidence_score</td><td>Authority × independence × freshness × corroboration</td></tr><tr><td>cluster_sources</td><td>Publisher/domain independence clustering</td></tr><tr><td>verify_draft_citations</td><td>Keyword-overlap entailment heuristics</td></tr><tr><td>repair_loop</td><td>Max 2 repair passes for blocking findings</td></tr><tr><td>budget_track</td><td>Perspective-level budget enforcement</td></tr><tr><td>scope_change_apply</td><td>Mid-run topic/perspective modifications</td></tr></tbody></table> <h2>Data Model</h2> <h3>Core Entities</h3> <pre class="language-undefined">${html(`<code class="language-undefined">ResearchRun
+├── ResearchObjective (title, primary_question, decision_to_support)
+├── ResearchScope (included/excluded topics, constraints, risk_level)
+├── Perspective[] (name, purpose, required_questions, budget_weight)
+├── ResearchQuestion[] (text, type, priority, parent/child edges)
+├── SearchPlan[] (queries, source mix, stop conditions)
+├── SourceRecord[] (canonical_uri, authority_class, independence_cluster)
+├── EvidenceFragment[] (exact_excerpt, normalized_statement, confidence)
+├── Claim[] (text, atomic_form, epistemic_status, evidence_ids)
+├── Contradiction[] (claim_ids, type, resolution_status)
+├── OutlineSection[] (title, required_claim_ids, minimum_evidence)
+├── SectionDraft[] (content, cited_claim_ids)
+├── VerificationFinding[] (type, severity, claim_id)
+├── ApprovalDecision[] (gate, status, decided_at)
+└── ResearchMetrics (coverage, confidence, cost, latency)</code>`)}</pre> <h2>Trust Boundaries</h2> <ol><li><strong>User → API</strong>: OAuth / API key authentication</li> <li><strong>API → Workflow</strong>: Run-scoped identity propagation</li> <li><strong>Agent → Tools</strong>: Policy engine evaluates <code>{principal, action, stage, risk}</code> → <code>{allow, deny, confirm}</code></li> <li><strong>Evidence → Claims</strong>: Data/instruction channel separation (prompt injection defense)</li> <li><strong>Claims → Report</strong>: Citation entailment verification before rendering</li> <li><strong>Report → Publication</strong>: Approval Gate D for external distribution</li></ol> <h2>Model Routing</h2> <table><thead><tr><th>Tier</th><th>Use</th><th>Model</th></tr></thead><tbody><tr><td>Fast</td><td>Query expansion, classification, extraction</td><td>gemini-2.5-flash</td></tr><tr><td>Reasoning</td><td>Scope, questions, claims, contradictions</td><td>gemini-2.5-pro</td></tr><tr><td>Verification</td><td>Citation entailment, causal overreach</td><td>gemini-2.5-flash (distinct prompt)</td></tr></tbody></table> <p>The verifier uses a distinct system prompt and lower temperature from the section writer to enforce the independence rule.</p>`);
+      },
+      $$slots: { default: true }
+    }
+  ]));
+}
+export {
+  _page_svx as default,
+  metadata
+};

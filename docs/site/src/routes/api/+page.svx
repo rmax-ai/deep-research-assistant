@@ -1,0 +1,248 @@
+---
+title: API Reference
+description: REST API surface for the Deep Research Assistant
+---
+
+# API Reference
+
+The Deep Research Assistant exposes a REST API (FastAPI) for creating, inspecting, and managing research runs.
+
+## Base URL
+
+```
+http://localhost:8000/v1
+```
+
+## Endpoints
+
+### Research Runs
+
+#### Create Research Run
+
+```
+POST /v1/research-runs
+```
+
+```json
+{
+  "objective": {
+    "title": "Secure agent runtime analysis",
+    "primary_question": "Which architectural controls are required for a secure enterprise agent runtime?",
+    "decision_to_support": "Define platform architecture"
+  },
+  "mode": "review_first",
+  "constraints": {
+    "minimum_primary_source_ratio": 0.6,
+    "maximum_cost": 50
+  }
+}
+```
+
+#### Inspect Research Run
+
+```
+GET /v1/research-runs/{run_id}
+```
+
+Returns the full research run aggregate with all nested entities.
+
+#### Get Research Graph
+
+```
+GET /v1/research-runs/{run_id}/graph
+```
+
+Returns the concept map projection: topics, questions, claims, and their relationships.
+
+#### Get Research Frontier
+
+```
+GET /v1/research-runs/{run_id}/frontier
+```
+
+Returns open, resolved, and blocked questions with priorities and dependency edges.
+
+#### Get Progress
+
+```
+GET /v1/research-runs/{run_id}/progress
+```
+
+Returns current phase, budget consumption, and completion estimates.
+
+#### Stream Events
+
+```
+GET /v1/research-runs/{run_id}/events
+```
+
+SSE stream of workflow events: `run.started`, `perspective.created`, `claim.created`, `verification.passed`, etc.
+
+### Interventions
+
+#### Apply Intervention
+
+```
+POST /v1/research-runs/{run_id}/interventions
+```
+
+```json
+{
+  "type": "challenge_claim",
+  "target_id": "C-104",
+  "instruction": "Find independent evidence that contradicts this claim."
+}
+```
+
+Supported intervention types:
+- `add_question` — add a new research question
+- `stop_branch` — stop investigating a question branch
+- `challenge_claim` — trigger counter-evidence search
+- `exclude_source` — remove a source from evidence
+- `increase_depth` — increase research depth on a topic
+- `pin_source` — force inclusion of a specific source
+- `suppress_question` — deprioritize a question
+- `compare_alternative` — add a new alternative for comparison
+
+### Approvals
+
+#### Get Pending Approvals
+
+```
+GET /v1/research-runs/{run_id}/approvals
+```
+
+#### Decide Approval
+
+```
+POST /v1/research-runs/{run_id}/approvals/{approval_id}
+```
+
+```json
+{
+  "decision": "approved",
+  "rationale": "Scope and risk assessment look correct"
+}
+```
+
+Approval gates:
+- **Gate A** — Scope: triggered for high-risk or ambiguous requests
+- **Gate B** — Research Plan: perspectives, questions, budget
+- **Gate C** — Evidence & Outline: claims, contradictions, proposed structure
+- **Gate D** — Publication: required for external distribution
+
+### Export
+
+```
+POST /v1/research-runs/{run_id}/exports
+```
+
+```json
+{
+  "format": "markdown"
+}
+```
+
+Supported formats: `markdown`, `html`, `json`, `evidence_package`, `executive_brief`
+
+### Watches
+
+#### Create Watch
+
+```
+POST /v1/research-watches
+```
+
+```json
+{
+  "run_id": "run-001",
+  "schedule": "0 6 * * 1",
+  "research_spec": { ... }
+}
+```
+
+#### Trigger Watch
+
+```
+POST /v1/research-watches/{watch_id}:trigger
+```
+
+Manually trigger a watch execution.
+
+### Knowledge Layer
+
+#### Publish Claim
+
+```
+POST /v1/knowledge/claims
+```
+
+```json
+{
+  "claim_id": "C-042",
+  "evidence_ids": ["E-12", "E-15"],
+  "confidence": 0.85
+}
+```
+
+#### Retrieve Claims
+
+```
+GET /v1/knowledge/claims?topic=agent+runtime&min_confidence=0.7
+```
+
+### Skills
+
+#### List Skills
+
+```
+GET /v1/skills
+```
+
+Returns available research skills with metadata (progressive disclosure).
+
+#### Load Skill
+
+```
+GET /v1/skills/{skill_id}
+```
+
+Loads full skill instructions after selection.
+
+## Response Model
+
+All responses follow a consistent envelope:
+
+```json
+{
+  "data": { ... },
+  "meta": {
+    "run_id": "run-001",
+    "phase": "researching",
+    "timestamp": "2026-06-19T12:00:00Z"
+  }
+}
+```
+
+## Events
+
+The SSE event stream emits typed events at each workflow stage:
+
+| Event | Payload |
+|-------|---------|
+| `run.started` | `{run_id, objective_title}` |
+| `scope.proposed` | `{scope, risk_level}` |
+| `approval.requested` | `{gate, display_data}` |
+| `perspective.created` | `{perspective_count}` |
+| `question.created` | `{question_count}` |
+| `query.executed` | `{query, results_count}` |
+| `source.accepted` | `{sources, accepted, rejected}` |
+| `evidence.extracted` | `{fragments}` |
+| `claim.created` | `{claims_created}` |
+| `contradiction.detected` | `{contradictions}` |
+| `coverage.updated` | `{coverage_metrics}` |
+| `outline.proposed` | `{section_count}` |
+| `section.generated` | `{section_title}` |
+| `verification.passed` | `{findings}` |
+| `verification.failed` | `{blocking_findings}` |
+| `run.completed` | `{report_length}` |
