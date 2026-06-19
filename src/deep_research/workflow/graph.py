@@ -419,38 +419,42 @@ async def knowledge_organize(ctx: Context, node_input: Any) -> dict[str, Any]:
 
 
 async def contradictions_search(ctx: Context, node_input: Any) -> dict[str, Any]:
-    """Track contradiction search completion for material claims."""
+    """Run counter-evidence agent and detect contradictions between claims."""
     state = get_state()
     claims = state.get("app:claims", [])
-    contradictions = state.get("app:contradictions", [])
-    seen = {
-        str(claim_id)
-        for contradiction in contradictions
-        for claim_id in contradiction.get("claim_ids", [])
-    }
+    evidence = state.get("app:evidence", [])
+    sources = state.get("app:sources", [])
 
-    new_records = []
-    for claim in claims:
-        if claim.get("materiality") not in {"high", "critical"}:
-            continue
-        claim_id = str(claim.get("claim_id"))
-        if claim_id in seen:
-            continue
-        new_records.append(
-            {
-                "contradiction_id": f"ctr-{claim_id}",
-                "claim_ids": [claim_id],
-                "resolution_status": "acknowledged",
-                "materiality": claim.get("materiality", "medium"),
-                "searched": True,
-            }
-        )
+    if not claims:
+        return {"contradictions_found": 0, "message": "No claims to check for contradictions"}
 
-    contradictions.extend(new_records)
+    # 1. Run counter-evidence agent (LLM-backed)
+    from deep_research.agents.counter_evidence import counter_evidence_agent
+    counter_result = await counter_evidence_agent(claims, evidence, sources)
+
+    # 2. Deterministic contradiction detection between claims
+    from deep_research.nodes.contradictions import detect_contradictions
+    detected = detect_contradictions(claims, evidence)
+
+    # Merge with existing contradictions
+    existing = state.get("app:contradictions", [])
+    existing_ids = {c.get("contradiction_id") for c in existing}
+    new_contradictions = [c for c in detected if c.get("contradiction_id") not in existing_ids]
+
+    contradictions = existing + new_contradictions
     state["app:contradictions"] = contradictions
-    if new_records:
-        await _publish("contradiction.detected", run_id=_run_id(state), contradictions=new_records)
-    return {"contradictions_found": len(new_records), "message": "Contradiction search recorded"}
+    state["app:counter_evidence"] = counter_result
+
+    if new_contradictions:
+        await _publish("contradiction.detected", run_id=_run_id(state),
+                       contradictions=new_contradictions)
+
+    return {
+        "contradictions_found": len(new_contradictions),
+        "counter_evidence_issues": len(counter_result.get("independence_issues", [])),
+        "total_contradictions": len(contradictions),
+        "message": f"Found {len(new_contradictions)} new contradictions",
+    }
 
 
 async def coverage_calculate(ctx: Context, node_input: Any) -> dict[str, Any]:
@@ -654,18 +658,40 @@ async def outline_not_required(ctx: Context, node_input: Any) -> dict[str, Any]:
 
 
 async def verify_draft(ctx: Context, node_input: Any) -> dict[str, Any]:
+    """Real verification: citation entailment + semantic check via Verifier agent."""
     state = get_state()
     drafts = state.get("app:drafts", [])
-    passed = bool(drafts)
+    claims = state.get("app:claims", [])
+    evidence = state.get("app:evidence", [])
+
+    if not drafts:
+        result = {"blocking_findings": 1, "passed": False, "message": "No drafts to verify"}
+        state["app:verification"] = result
+        ctx.route = 0
+        return result
+
+    # Heuristic citation entailment check (always runs)
+    from deep_research.nodes.verification import verify_draft_citations
+    citation_result = verify_draft_citations(drafts, claims, evidence)
+
+    # LLM semantic verification
+    from deep_research.agents.verifier import verifier
+    semantic_result = await verifier(drafts, claims, evidence)
+
+    # Merge findings
+    merged_findings = citation_result.get("findings", []) + semantic_result.get("findings", [])
+    blocking = citation_result.get("blocking_findings", 0) + semantic_result.get("blocking_findings", 0)
+
     result = {
-        "blocking_findings": 0 if passed else 1,
-        "passed": passed,
-        "message": "Verification stub",
+        "findings": merged_findings,
+        "blocking_findings": blocking,
+        "major_findings": citation_result.get("major_findings", 0) + semantic_result.get("major_findings", 0),
+        "passed": blocking == 0,
     }
     state["app:verification"] = result
-    ctx.route = 1 if passed else 0
+    ctx.route = 1 if result["passed"] else 0
     await _publish(
-        "verification.passed" if passed else "verification.failed",
+        "verification.passed" if result["passed"] else "verification.failed",
         run_id=_run_id(state),
         verification=result,
     )
@@ -673,15 +699,41 @@ async def verify_draft(ctx: Context, node_input: Any) -> dict[str, Any]:
 
 
 async def repair_draft(ctx: Context, node_input: Any) -> dict[str, Any]:
+    """Repair loop: attempt to fix verification findings (max 2 passes)."""
     state = get_state()
-    result = {"issues_repaired": 0, "message": "Repair stub"}
+    verification = state.get("app:verification", {})
+    repair_count = state.get("app:repair_count", 0)
+
+    from deep_research.nodes.verification import repair_loop
+
+    repair_result = repair_loop(
+        findings=verification.get("findings", []),
+        drafts=state.get("app:drafts", []),
+        max_repairs=2,
+    )
+
+    state["app:repair_count"] = repair_count + 1
+    state["app:repair_result"] = repair_result
     state["app:phase"] = "repairing"
-    return result
+    return repair_result
 
 
 async def final_gate_check(ctx: Context, node_input: Any) -> dict[str, Any]:
     state = get_state()
     drafts = state.get("app:drafts", [])
+    verification = state.get("app:verification", {})
+
+    # Block publication if verification has blocking findings
+    if verification.get("blocking_findings", 0) > 0:
+        state["app:final_report_preview"] = ""
+        result = {
+            "approved": False,
+            "message": f"Blocked: {verification['blocking_findings']} blocking findings remain",
+        }
+        state["app:final_gate_result"] = result
+        ctx.route = 0
+        return result
+
     state["app:final_report_preview"] = "\n\n".join(draft.get("content", "") for draft in drafts)[:500]
     gate = await check_gate("D", state, get_settings())
     state["app:last_gate_D"] = gate.model_dump()
