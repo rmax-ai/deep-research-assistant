@@ -10,7 +10,7 @@ The Deep Research Assistant exposes a REST API (FastAPI) for creating, inspectin
 ## Base URL
 
 ```
-http://localhost:8000/v1
+http://localhost:8080/v1
 ```
 
 ## Endpoints
@@ -45,6 +45,7 @@ GET /v1/research-runs/{run_id}
 ```
 
 Returns the full research run aggregate with all nested entities.
+Currently returns summary status, objective/scope, counts, and a report preview.
 
 #### Get Research Graph
 
@@ -53,6 +54,7 @@ GET /v1/research-runs/{run_id}/graph
 ```
 
 Returns the concept map projection: topics, questions, claims, and their relationships.
+Currently returns run metadata plus `claims` and `sources`. Use `/concept-map` for the projected topic graph.
 
 #### Get Research Frontier
 
@@ -61,6 +63,7 @@ GET /v1/research-runs/{run_id}/frontier
 ```
 
 Returns open, resolved, and blocked questions with priorities and dependency edges.
+Currently returns the current question list and priority map.
 
 #### Get Progress
 
@@ -96,13 +99,10 @@ POST /v1/research-runs/{run_id}/interventions
 
 Supported intervention types:
 - `add_question` — add a new research question
-- `stop_branch` — stop investigating a question branch
 - `challenge_claim` — trigger counter-evidence search
-- `exclude_source` — remove a source from evidence
-- `increase_depth` — increase research depth on a topic
-- `pin_source` — force inclusion of a specific source
-- `suppress_question` — deprioritize a question
-- `compare_alternative` — add a new alternative for comparison
+- `add_topic` / `remove_topic` — queue a scope change
+- `add_perspective` — queue a new perspective
+- `change_budget` — queue a budget change
 
 ### Approvals
 
@@ -143,84 +143,16 @@ POST /v1/research-runs/{run_id}/exports
 }
 ```
 
-Supported formats: `markdown`, `html`, `json`, `evidence_package`, `executive_brief`
+Current implementation returns the generated report body and echoes the requested `format`. Dedicated HTML/JSON/evidence-package rendering is not implemented yet.
 
-### Watches
+## Response Model
 
-#### Create Watch
-
-```
-POST /v1/research-watches
-```
+Most endpoints currently return plain JSON objects rather than a shared response envelope.
 
 ```json
 {
   "run_id": "run-001",
-  "schedule": "0 6 * * 1",
-  "research_spec": { ... }
-}
-```
-
-#### Trigger Watch
-
-```
-POST /v1/research-watches/{watch_id}:trigger
-```
-
-Manually trigger a watch execution.
-
-### Knowledge Layer
-
-#### Publish Claim
-
-```
-POST /v1/knowledge/claims
-```
-
-```json
-{
-  "claim_id": "C-042",
-  "evidence_ids": ["E-12", "E-15"],
-  "confidence": 0.85
-}
-```
-
-#### Retrieve Claims
-
-```
-GET /v1/knowledge/claims?topic=agent+runtime&min_confidence=0.7
-```
-
-### Skills
-
-#### List Skills
-
-```
-GET /v1/skills
-```
-
-Returns available research skills with metadata (progressive disclosure).
-
-#### Load Skill
-
-```
-GET /v1/skills/{skill_id}
-```
-
-Loads full skill instructions after selection.
-
-## Response Model
-
-All responses follow a consistent envelope:
-
-```json
-{
-  "data": { ... },
-  "meta": {
-    "run_id": "run-001",
-    "phase": "researching",
-    "timestamp": "2026-06-19T12:00:00Z"
-  }
+  "status": "completed"
 }
 ```
 

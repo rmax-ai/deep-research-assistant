@@ -591,10 +591,14 @@ Every node span records: run_id, workflow_version, node_path, agent_name, model_
 - `POST /v1/research-runs` — Create run
 - `GET /v1/research-runs/{run_id}` — Inspect run
 - `GET /v1/research-runs/{run_id}/graph` — Get research graph
+- `GET /v1/research-runs/{run_id}/frontier` — Get active research frontier
+- `GET /v1/research-runs/{run_id}/progress` — Get phase and budget progress
+- `GET /v1/research-runs/{run_id}/events` — Stream/replay workflow events
+- `GET /v1/research-runs/{run_id}/concept-map` — Get projected topic graph
 - `POST /v1/research-runs/{run_id}/interventions` — User intervention
+- `GET /v1/research-runs/{run_id}/approvals` — Read approval state
 - `POST /v1/research-runs/{run_id}/approvals/{approval_id}` — Approve/reject gate
-- `POST /v1/research-runs/{run_id}:resume` — Resume interrupted run
-- `POST /v1/research-runs/{run_id}/exports` — Export (formats: markdown, HTML, PDF, JSON, evidence package, executive brief)
+- `POST /v1/research-runs/{run_id}/exports` — Export report body (current implementation echoes requested format; dedicated converters are planned)
 
 ### Streaming Events
 - `run.started`, `scope.proposed`, `approval.requested`

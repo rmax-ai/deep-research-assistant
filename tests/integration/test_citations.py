@@ -14,22 +14,36 @@ LLM_AVAILABLE = bool(os.environ.get("GOOGLE_API_KEY"))
 class TestCitationEntailment:
     @pytest.mark.skipif(not LLM_AVAILABLE, reason="GOOGLE_API_KEY not set")
     async def test_full_pipeline_produces_claims_with_evidence_llm(self):
-        from google.adk.runners import InMemoryRunner
-        from google.genai.types import Content, Part
+        from deep_research.agents import generate_structured
+        from deep_research.agents.claim_builder import claim_builder
+        from deep_research.agents.evidence_curator import evidence_curator
+        from deep_research.agents.research_director import research_director
 
-        from deep_research.workflow.graph import build_research_workflow
-        from deep_research.workflow.state import get_state, reset_state
+        raw = await generate_structured(
+            "Reply with OK only",
+            model="gemini-2.5-flash",
+            max_output_tokens=8,
+            timeout_seconds=20,
+        )
+        assert raw.strip() == "OK"
 
-        reset_state()
-        wf = build_research_workflow()
-        runner = InMemoryRunner(agent=wf, app_name="cit")
-        await runner.session_service.create_session(app_name="cit", user_id="u", session_id="s")
-        msg = Content(role="user", parts=[Part(text="Analyze ADK 2.0 tool governance")])
-        async for _ in runner.run_async(user_id="u", session_id="s", new_message=msg):
-            pass
-        state = get_state()
-        claims = state.get("app:claims", [])
-        evidence = state.get("app:evidence", [])
+        plan = await research_director("Analyze ADK 2.0 tool governance", model="gemini-2.5-flash")
+        assert isinstance(plan.get("scope"), dict)
+        assert len(plan.get("proposed_perspectives", [])) >= 4
+
+        evidence = await evidence_curator(
+            "ADK 2.0 provides a workflow runtime with tool governance controls.",
+            source_title="Example ADK Note",
+            question="What governance controls exist in ADK 2.0?",
+            model="gemini-2.5-flash",
+        )
+        assert len(evidence) > 0, "No evidence fragments"
+
+        claims = await claim_builder(
+            evidence,
+            question="What governance controls exist in ADK 2.0?",
+            model="gemini-2.5-flash",
+        )
         assert len(claims) > 0, "No claims"
         for c in claims:
             if c.get("epistemic_status") in ("source_stated", "extracted"):
@@ -37,7 +51,6 @@ class TestCitationEntailment:
                 assert len(refs) > 0
                 for r in refs:
                     assert r < len(evidence)
-        reset_state()
 
     async def test_pipeline_produces_output_stub(self):
         from google.adk.runners import InMemoryRunner

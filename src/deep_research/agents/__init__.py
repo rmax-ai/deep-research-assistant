@@ -6,10 +6,13 @@ structured output parsing with fallback patterns.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 from typing import Any
+
+from deep_research.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,7 @@ async def generate_structured(
     system_instruction: str | None = None,
     temperature: float = 0.1,
     max_output_tokens: int = 4096,
+    timeout_seconds: int | None = None,
 ) -> str:
     """Generate text with Gemini and return the raw response.
 
@@ -46,6 +50,7 @@ async def generate_structured(
         system_instruction: Optional system-level instruction.
         temperature: Sampling temperature (0.0-1.0).
         max_output_tokens: Maximum tokens in response.
+        timeout_seconds: Optional timeout for the model call.
 
     Returns:
         The model's text response.
@@ -66,12 +71,84 @@ async def generate_structured(
     if system_instruction:
         config["system_instruction"] = system_instruction
 
-    response = client.models.generate_content(
+    timeout = timeout_seconds or get_settings().workflow.llm_timeout_seconds
+
+    response = await _invoke_model(
+        client=client,
         model=model,
-        contents=prompt,
+        prompt=prompt,
         config=config,
+        timeout=timeout,
     )
-    return str(response.text)
+    text = _extract_response_text(response)
+    if not text and _response_hit_max_tokens(response):
+        retry_config = dict(config)
+        retry_config["max_output_tokens"] = max(int(max_output_tokens) * 2, 32)
+        response = await _invoke_model(
+            client=client,
+            model=model,
+            prompt=prompt,
+            config=retry_config,
+            timeout=timeout,
+        )
+        text = _extract_response_text(response)
+
+    if not text:
+        raise RuntimeError("Model returned no text content")
+    return text
+
+
+async def _invoke_model(
+    client: Any,
+    model: str,
+    prompt: str,
+    config: dict[str, object],
+    timeout: int,
+) -> Any:
+    """Run a blocking Gemini call in a thread with an async timeout."""
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(
+                client.models.generate_content,
+                model=model,
+                contents=prompt,
+                config=config,
+            ),
+            timeout=timeout,
+        )
+    except TimeoutError as exc:
+        raise RuntimeError(f"LLM call timed out after {timeout}s") from exc
+
+
+def _extract_response_text(response: Any) -> str:
+    """Extract text from Gemini responses, falling back to candidate parts."""
+    direct_text = getattr(response, "text", None)
+    if isinstance(direct_text, str) and direct_text.strip():
+        return direct_text
+
+    candidates = getattr(response, "candidates", None) or []
+    for candidate in candidates:
+        content = getattr(candidate, "content", None)
+        parts = getattr(content, "parts", None) or []
+        texts = [
+            part_text.strip()
+            for part in parts
+            for part_text in [getattr(part, "text", None)]
+            if isinstance(part_text, str) and part_text.strip()
+        ]
+        if texts:
+            return "\n".join(texts)
+
+    return ""
+
+
+def _response_hit_max_tokens(response: Any) -> bool:
+    """Return whether the first candidate stopped because it hit the token cap."""
+    candidates = getattr(response, "candidates", None) or []
+    if not candidates:
+        return False
+    finish_reason = getattr(candidates[0], "finish_reason", None)
+    return str(finish_reason).endswith("MAX_TOKENS")
 
 
 def parse_json_response(text: str, default: Any = None) -> Any:

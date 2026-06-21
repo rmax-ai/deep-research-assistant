@@ -219,6 +219,25 @@ class TestCollaborationEndpoints:
         assert data["approval_id"] == "C"
         assert data["status"] == "rejected"
 
+    async def test_get_approvals_endpoint_returns_gate_state(self, client):
+        create_resp = await client.post(
+            "/v1/research-runs",
+            json={"objective": {"title": "Approval Readback", "primary_question": "Need gate state"}},
+            timeout=60,
+        )
+        run_id = create_resp.json()["run_id"]
+
+        await client.post(
+            f"/v1/research-runs/{run_id}/approvals/C",
+            json={"decision": "approved", "rationale": "Looks good."},
+        )
+
+        response = await client.get(f"/v1/research-runs/{run_id}/approvals")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["run_id"] == run_id
+        assert data["approvals"]["C"]["status"] == "approved"
+
 
 @pytest.mark.asyncio
 class TestExport:

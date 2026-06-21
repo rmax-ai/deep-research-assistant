@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import time
+from types import SimpleNamespace
+
 import pytest
 
 
@@ -159,3 +162,41 @@ class TestAgentInit:
         from deep_research.agents import parse_json_response
 
         assert parse_json_response("not json", default={"fallback": True}) == {"fallback": True}
+
+    @pytest.mark.asyncio
+    async def test_generate_structured_falls_back_to_candidate_parts(self, monkeypatch: pytest.MonkeyPatch):
+        from deep_research.agents import generate_structured
+
+        class FakeModels:
+            @staticmethod
+            def generate_content(*args, **kwargs):
+                return SimpleNamespace(
+                    text=None,
+                    candidates=[
+                        SimpleNamespace(
+                            content=SimpleNamespace(parts=[SimpleNamespace(text="OK from parts")])
+                        )
+                    ],
+                )
+
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setattr("deep_research.agents.get_client", lambda: SimpleNamespace(models=FakeModels()))
+
+        result = await generate_structured("Say OK", timeout_seconds=1)
+        assert result == "OK from parts"
+
+    @pytest.mark.asyncio
+    async def test_generate_structured_times_out(self, monkeypatch: pytest.MonkeyPatch):
+        from deep_research.agents import generate_structured
+
+        class SlowModels:
+            @staticmethod
+            def generate_content(*args, **kwargs):
+                time.sleep(0.2)
+                return SimpleNamespace(text="late")
+
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setattr("deep_research.agents.get_client", lambda: SimpleNamespace(models=SlowModels()))
+
+        with pytest.raises(RuntimeError, match="timed out"):
+            await generate_structured("Say OK", timeout_seconds=0.01)

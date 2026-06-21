@@ -90,6 +90,7 @@ class WorkflowConfig(BaseSettings):
     max_cycles: int = 10
     low_information_gain_cycle_threshold: int = 3
     information_gain_floor: float = 0.05
+    llm_timeout_seconds: int = 45
 
 
 class SchedulerConfig(BaseSettings):

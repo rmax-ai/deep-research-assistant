@@ -369,6 +369,18 @@ async def submit_approval(run_id: str, approval_id: str, request: ApprovalAction
     }
 
 
+@app.get("/v1/research-runs/{run_id}/approvals")
+async def get_approvals(run_id: str) -> dict[str, Any]:
+    """Return the current approval gate state for a run."""
+    run_data = _require_run(run_id)
+    state = run_data.get("state", {})
+    approvals = state.get("app:approval_decisions", run_data.get("approvals", {}))
+    return {
+        "run_id": run_id,
+        "approvals": approvals if isinstance(approvals, dict) else {},
+    }
+
+
 @app.post("/v1/research-runs/{run_id}/exports")
 async def export_report(run_id: str, format: str = "markdown") -> dict[str, Any]:
     """Export the final report in the requested format."""
