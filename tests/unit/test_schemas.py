@@ -1,6 +1,8 @@
 """Tests for core schema models."""
 
 
+from datetime import UTC
+
 from deep_research.schemas import (
     ApprovalDecision,
     ApprovalGate,
@@ -82,6 +84,12 @@ class TestResearchRun:
         run = ResearchRun(run_id="r1", user_id="u1", objective=obj, scope=scope)
         assert run.scope.included_topics == ["security"]
 
+    def test_timestamps_are_timezone_aware(self):
+        obj = ResearchObjective(title="T", primary_question="Q?")
+        run = ResearchRun(run_id="r1", user_id="u1", objective=obj)
+        assert run.created_at.tzinfo == UTC
+        assert run.updated_at.tzinfo == UTC
+
 
 class TestResearchScope:
     def test_defaults(self):
@@ -146,6 +154,13 @@ class TestResearchQuestion:
         )
         graph = QuestionGraph(run_id="r1", questions={"q1": q1, "q2": q2})
         assert len(graph.questions) == 2
+
+    def test_question_timestamps_are_timezone_aware(self):
+        question = ResearchQuestion(
+            question_id="q1", text="What is ADK?", question_type=QuestionType.DEFINITIONAL
+        )
+        assert question.created_at.tzinfo == UTC
+        assert question.updated_at.tzinfo == UTC
 
 
 class TestSearchPlan:

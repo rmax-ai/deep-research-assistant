@@ -7,6 +7,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from deep_research.schemas._time import utc_now
+
 
 class QuestionType(StrEnum):
     DEFINITIONAL = "definitional"
@@ -60,8 +62,8 @@ class ResearchQuestion(BaseModel):
     resolution_summary: str | None = None
     linked_claim_ids: list[str] = Field(default_factory=list)
     linked_query_ids: list[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class QuestionEdge(BaseModel):

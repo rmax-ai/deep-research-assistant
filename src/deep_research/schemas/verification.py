@@ -7,6 +7,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from deep_research.schemas._time import utc_now
+
 
 class VerificationSeverity(StrEnum):
     BLOCKING = "blocking"
@@ -25,7 +27,7 @@ class VerificationFinding(BaseModel):
     affected_section_ids: list[str] = Field(default_factory=list)
     suggested_fix: str | None = None
     verifier_model: str = ""
-    found_at: datetime = Field(default_factory=datetime.utcnow)
+    found_at: datetime = Field(default_factory=utc_now)
 
 
 class VerificationReport(BaseModel):
@@ -36,4 +38,4 @@ class VerificationReport(BaseModel):
     findings: list[VerificationFinding] = Field(default_factory=list)
     blocking_count: int = 0
     passed: bool = False
-    verified_at: datetime = Field(default_factory=datetime.utcnow)
+    verified_at: datetime = Field(default_factory=utc_now)

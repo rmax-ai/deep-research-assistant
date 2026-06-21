@@ -6,6 +6,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from deep_research.schemas._time import utc_now
+
 
 class MissingClaim(BaseModel):
     """A claim that the section writer needs but doesn't have."""
@@ -24,4 +26,4 @@ class SectionDraft(BaseModel):
     missing_claims: list[MissingClaim] = Field(default_factory=list)
     model_id: str = ""
     prompt_version: str = ""
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=utc_now)

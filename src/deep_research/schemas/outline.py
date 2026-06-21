@@ -7,6 +7,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from deep_research.schemas._time import utc_now
 from deep_research.schemas.scope import SourceMix
 
 
@@ -39,4 +40,4 @@ class Outline(BaseModel):
     run_id: str
     version: int = 1
     sections: list[OutlineSection] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)

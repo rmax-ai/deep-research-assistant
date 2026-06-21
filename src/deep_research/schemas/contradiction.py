@@ -7,6 +7,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from deep_research.schemas._time import utc_now
 from deep_research.schemas.claim import Materiality
 
 
@@ -40,4 +41,4 @@ class Contradiction(BaseModel):
     possible_resolution: str | None = None
     resolution_status: ResolutionStatus = ResolutionStatus.UNRESOLVED
     materiality: Materiality = Materiality.MEDIUM
-    detected_at: datetime = Field(default_factory=datetime.utcnow)
+    detected_at: datetime = Field(default_factory=utc_now)

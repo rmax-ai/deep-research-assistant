@@ -7,6 +7,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from deep_research.schemas._time import utc_now
+
 
 class ClaimType(StrEnum):
     FACTUAL = "factual"
@@ -85,5 +87,5 @@ class Claim(BaseModel):
     materiality: Materiality = Materiality.MEDIUM
     review_status: ReviewStatus = ReviewStatus.UNREVIEWED
     owner_agent: str = ""
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)

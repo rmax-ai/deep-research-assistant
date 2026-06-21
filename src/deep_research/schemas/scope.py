@@ -7,6 +7,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from deep_research.schemas._time import utc_now
+
 
 class RiskLevel(StrEnum):
     LOW = "low"
@@ -89,4 +91,4 @@ class ResearchScope(BaseModel):
     definitions: list[Definition] = Field(default_factory=list)
     assumptions: list[Assumption] = Field(default_factory=list)
     risk_level: RiskLevel = RiskLevel.MEDIUM
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)

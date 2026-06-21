@@ -7,6 +7,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from deep_research.schemas._time import utc_now
 from deep_research.schemas.scope import TimeRange
 
 
@@ -40,4 +41,4 @@ class EvidenceFragment(BaseModel):
     qualifiers: list[str] = Field(default_factory=list)
     confidence: float = 0.5
     content_hash: str = ""
-    extracted_at: datetime = Field(default_factory=datetime.utcnow)
+    extracted_at: datetime = Field(default_factory=utc_now)

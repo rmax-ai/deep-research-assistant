@@ -7,6 +7,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from deep_research.schemas._time import utc_now
 from deep_research.schemas.scope import SourceType
 
 
@@ -42,7 +43,7 @@ class SourceRecord(BaseModel):
     publisher: str | None = None
     author: str | None = None
     publication_date: date | None = None
-    retrieved_at: datetime = Field(default_factory=datetime.utcnow)
+    retrieved_at: datetime = Field(default_factory=utc_now)
     source_type: SourceType = SourceType.OTHER
     authority_class: AuthorityClass = AuthorityClass.UNKNOWN
     independence_cluster_id: str | None = None

@@ -6,6 +6,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from deep_research.schemas._time import utc_now
+
 
 class StoppingDecision(BaseModel):
     """Result of stopping condition evaluation."""
@@ -39,4 +41,4 @@ class ResearchMetrics(BaseModel):
     total_cost: float = 0.0
     total_wall_time_seconds: float = 0.0
     human_interventions: int = 0
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=utc_now)
