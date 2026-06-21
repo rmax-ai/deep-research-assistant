@@ -217,6 +217,32 @@ class TestWorkflowGraph:
 
         assert state["app:phase"] == "failed"
 
+    async def test_repair_draft_updates_verification_state_after_successful_repair(self):
+        from deep_research.workflow.graph import repair_draft
+        from deep_research.workflow.state import get_state, reset_state
+
+        reset_state()
+        state = get_state()
+        state.update(
+            {
+                "app:verification": {
+                    "blocking_findings": 1,
+                    "major_findings": 0,
+                    "findings": [{"severity": "blocking", "message": "Missing citation"}],
+                    "passed": False,
+                },
+                "app:repair_count": 0,
+                "app:drafts": [{"content": "Draft"}],
+            }
+        )
+
+        result = await repair_draft(SimpleNamespace(route=None), None)
+
+        assert result["remaining_blocking"] == 0
+        assert state["app:verify_result"]["blocking_findings"] == 0
+        assert state["app:verification"]["passed"] is True
+        assert state["app:verification"]["findings"] == []
+
 
 class TestScheduler:
     def test_highest_priority_question_selected(self):

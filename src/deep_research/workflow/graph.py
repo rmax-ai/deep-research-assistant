@@ -1004,7 +1004,20 @@ async def repair_draft(ctx: Context, node_input: Any) -> dict[str, Any]:
         max_repairs=max_repair_passes,
     )
 
+    unresolved_blocking = repair_result.get("remaining_blocking", verification.get("blocking_findings", 0))
+    unresolved_major = repair_result.get("remaining_major", verification.get("major_findings", 0))
+    repaired_verification = {
+        **verification,
+        "blocking_findings": unresolved_blocking,
+        "major_findings": unresolved_major,
+        "passed": unresolved_blocking == 0,
+    }
+    if unresolved_blocking == 0 and unresolved_major == 0:
+        repaired_verification["findings"] = []
+
     state["app:repair_count"] = repair_count + 1
+    state["app:verify_result"] = repaired_verification
+    state["app:verification"] = repaired_verification
     state["app:repair_result"] = repair_result
     state["app:phase"] = "repairing"
     _workflow_log(
