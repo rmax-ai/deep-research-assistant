@@ -97,9 +97,9 @@ async def evidence_curator(
             max_output_tokens=4096,
         )
         result = parse_json_response(response, default={"fragments": []})
-        fragments = result.get("fragments", [])
+        fragments = result.get("fragments", []) if isinstance(result, dict) else []
         logger.info("evidence_curator: extracted %d fragments from %r", len(fragments), source_title[:60])
-        return fragments
+        return fragments if isinstance(fragments, list) else _stub_evidence(source_content, source_title)
     except Exception as exc:
         logger.error("evidence_curator failed: %s", exc)
         return _stub_evidence(source_content, source_title)

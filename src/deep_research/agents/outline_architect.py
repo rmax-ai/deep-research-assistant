@@ -110,7 +110,7 @@ Create a structured outline from these claims."""
         )
         result = parse_json_response(response, default={})
         logger.info("outline_architect: created outline with %d sections", len(result.get("sections", [])))
-        return result
+        return result if isinstance(result, dict) else _stub_outline(claims)
     except Exception as exc:
         logger.error("outline_architect failed: %s", exc)
         return _stub_outline(claims)

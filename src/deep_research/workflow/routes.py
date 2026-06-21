@@ -18,7 +18,10 @@ def should_continue_research(state: dict[str, Any]) -> bool:
     """
     stop = state.get("app:stop_result", {})
     scheduler = state.get("app:scheduler_result", {})
-    if stop.get("should_stop", True):
+    should_stop = stop.get("should_stop", True)
+    if not isinstance(should_stop, bool):
+        should_stop = True
+    if should_stop:
         return False
     return scheduler.get("next_question_id") is not None
 
@@ -26,13 +29,15 @@ def should_continue_research(state: dict[str, Any]) -> bool:
 def has_blocking_findings(state: dict[str, Any]) -> bool:
     """Check if verification found blocking issues."""
     verify = state.get("app:verify_result", {})
-    return verify.get("blocking_findings", 0) > 0
+    blocking_findings = verify.get("blocking_findings", 0)
+    return isinstance(blocking_findings, int) and blocking_findings > 0
 
 
 def was_approved(state: dict[str, Any], result_key: str) -> bool:
     """Check if a gate was approved."""
     result = state.get(result_key, {})
-    return result.get("approved", True)
+    approved = result.get("approved", True)
+    return approved if isinstance(approved, bool) else True
 
 
 def route_after_approve_plan(ctx: Context) -> str:

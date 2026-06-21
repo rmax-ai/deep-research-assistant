@@ -13,7 +13,6 @@ import logging
 from typing import Any
 
 import httpx
-from google.adk.tools import ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,7 @@ USER_AGENT = (
 async def web_search(
     query: str,
     max_results: int = 5,
-    tool_context: ToolContext | None = None,
+    tool_context: Any | None = None,
 ) -> dict[str, Any]:
     """Search the web for information on a given query.
 

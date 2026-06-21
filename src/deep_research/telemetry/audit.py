@@ -63,7 +63,7 @@ def record_event(
     event["chain_hash"] = _hash_event(event, previous_hash)
 
     events.append(event)
-    return event["event_id"]
+    return str(event["event_id"])
 
 
 def get_audit_trail(run_id: str) -> list[dict[str, Any]]:

@@ -9,7 +9,7 @@ import enum
 from typing import Any
 
 
-class PolicyDecision(str, enum.Enum):
+class PolicyDecision(enum.StrEnum):
     ALLOW = "allow"
     DENY = "deny"
     CONFIRM = "confirm"

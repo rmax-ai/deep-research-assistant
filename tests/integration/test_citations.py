@@ -4,6 +4,7 @@ Verifies Phase 1 exit criteria with both LLM and stub modes.
 """
 
 import os
+
 import pytest
 
 LLM_AVAILABLE = bool(os.environ.get("GOOGLE_API_KEY"))
@@ -15,6 +16,7 @@ class TestCitationEntailment:
     async def test_full_pipeline_produces_claims_with_evidence_llm(self):
         from google.adk.runners import InMemoryRunner
         from google.genai.types import Content, Part
+
         from deep_research.workflow.graph import build_research_workflow
         from deep_research.workflow.state import get_state, reset_state
 
@@ -40,6 +42,7 @@ class TestCitationEntailment:
     async def test_pipeline_produces_output_stub(self):
         from google.adk.runners import InMemoryRunner
         from google.genai.types import Content, Part
+
         from deep_research.workflow.graph import build_research_workflow
         from deep_research.workflow.state import get_state, reset_state
 

@@ -72,7 +72,6 @@ def verify_draft_citations(
     findings: list[dict[str, Any]] = []
 
     for draft in drafts:
-        content = draft.get("content", "")
         cited_claim_ids = draft.get("cited_claim_ids", [])
 
         for cid in cited_claim_ids:
@@ -107,7 +106,7 @@ def verify_draft_citations(
                 excerpt = ev.get("exact_excerpt", ev.get("normalized_statement", ""))
                 if not excerpt:
                     continue
-                entailed, conf = check_entailment(
+                entailed, _confidence = check_entailment(
                     claim.get("text", ""), excerpt,
                 )
                 if entailed:
@@ -154,7 +153,7 @@ def repair_loop(
 
     # Mark drafts that need repair
     repaired_count = 0
-    for finding in blocking_findings[:max_repairs]:
+    for _finding in blocking_findings[:max_repairs]:
         # In a real implementation, this would trigger the section writer
         # to re-generate the problematic section. For now, record the attempt.
         repaired_count += 1

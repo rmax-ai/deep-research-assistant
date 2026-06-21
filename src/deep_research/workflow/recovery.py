@@ -89,7 +89,10 @@ def load_latest_checkpoint(
     latest = files[0]
     logger.info("loading checkpoint: %s", latest)
     checkpoint = json.loads(latest.read_text())
-    return checkpoint.get("state", {})
+    if not isinstance(checkpoint, dict):
+        return None
+    state = checkpoint.get("state")
+    return state if isinstance(state, dict) else None
 
 
 def restore_checkpoint(

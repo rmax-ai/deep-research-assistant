@@ -143,7 +143,7 @@ async def research_director(
         )
         result = parse_json_response(response)
         logger.info("research_director: plan generated for %r", user_objective[:80])
-        return result
+        return result if isinstance(result, dict) else _stub_plan(user_objective)
     except Exception as exc:
         logger.error("research_director failed: %s", exc)
         return _stub_plan(user_objective)

@@ -10,7 +10,6 @@ import logging
 from typing import Any
 
 import httpx
-from google.adk.tools import ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +24,7 @@ USER_AGENT = (
 async def url_retrieve(
     url: str,
     max_length: int = MAX_CONTENT_LENGTH,
-    tool_context: ToolContext | None = None,
+    tool_context: Any | None = None,
 ) -> dict[str, Any]:
     """Retrieve and extract text content from a URL.
 

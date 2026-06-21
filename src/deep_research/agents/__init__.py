@@ -59,7 +59,7 @@ async def generate_structured(
         )
 
     client = get_client()
-    config = {
+    config: dict[str, object] = {
         "temperature": temperature,
         "max_output_tokens": max_output_tokens,
     }
@@ -71,7 +71,7 @@ async def generate_structured(
         contents=prompt,
         config=config,
     )
-    return response.text
+    return str(response.text)
 
 
 def parse_json_response(text: str, default: Any = None) -> Any:

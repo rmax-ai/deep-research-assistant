@@ -125,9 +125,9 @@ Build atomic claims from this evidence."""
             temperature=0.1,
         )
         result = parse_json_response(response, default={"claims": []})
-        claims = result.get("claims", [])
+        claims = result.get("claims", []) if isinstance(result, dict) else []
         logger.info("claim_builder: built %d claims from %d fragments", len(claims), len(evidence_fragments))
-        return claims
+        return claims if isinstance(claims, list) else _stub_claims(evidence_fragments)
     except Exception as exc:
         logger.error("claim_builder failed: %s", exc)
         return _stub_claims(evidence_fragments)

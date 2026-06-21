@@ -10,6 +10,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from deep_research.agents import generate_structured, is_llm_available
+from deep_research.nodes.verification import verify_draft_citations
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,13 +42,10 @@ async def verifier(
         }
 
     # Always run heuristic entailment check (no LLM required)
-    from deep_research.nodes.verification import verify_draft_citations
     citation_check = verify_draft_citations(drafts, claims, evidence)
     findings = list(citation_check.get("findings", []))
 
     # Try LLM path for semantic verification (cross-section, causal overreach)
-    from deep_research.agents.research_director import is_llm_available, generate_structured
-
     if is_llm_available():
         try:
             prompt = _build_verifier_prompt(drafts, claims)
@@ -118,7 +118,7 @@ FINDING: <type> | <severity: blocking/major/minor> | <section> | <description>
 
 def _parse_verifier_response(response: str) -> list[dict[str, Any]]:
     """Parse verifier LLM response into findings."""
-    findings = []
+    findings: list[dict[str, Any]] = []
     for line in response.strip().split("\n"):
         line = line.strip()
         if line.startswith("FINDING:"):
@@ -142,7 +142,7 @@ def _cross_section_consistency(
 
     Checks for contradictory claim references across sections.
     """
-    findings = []
+    findings: list[dict[str, Any]] = []
     claim_refs: dict[str, set[str]] = {}  # claim_id → {section_titles}
 
     for draft in drafts:

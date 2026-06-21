@@ -6,9 +6,8 @@ relevance, freshness, corroboration, qualifications, claim type, and verificatio
 
 from __future__ import annotations
 
+from datetime import UTC, date, datetime
 from typing import Any
-
-from deep_research.settings import get_settings
 
 # ── Confidence labels ─────────────────────────────────────────────────────
 
@@ -104,8 +103,6 @@ def _evidence_freshness(
     sources: dict[str, dict[str, Any]],
 ) -> float:
     """Score evidence freshness — newer sources score higher."""
-    from datetime import datetime, UTC, date
-
     evidence_ids = claim.get("evidence_ids", [])
     now = datetime.now(UTC).date()
     freshness_scores = []
@@ -207,8 +204,6 @@ def compute_claim_confidence(
             major = sum(1 for f in findings if f.get("severity") == "major")
             verif_score = max(0.1, 1.0 - (0.3 * blocking) - (0.1 * major))
 
-    # Weighted computation
-    weights = get_settings().information_gain
     confidence = (
         0.25 * auth
         + 0.15 * indep

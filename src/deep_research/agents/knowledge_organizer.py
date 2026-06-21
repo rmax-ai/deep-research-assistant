@@ -41,7 +41,7 @@ async def knowledge_organizer(
 
     for perspective, grouped_questions in perspective_groups.items():
         topic_id = f"topic-{_slug(perspective) or 'general'}"
-        topic_node = {
+        topic_node: dict[str, Any] = {
             "id": topic_id,
             "label": perspective.replace("_", " ").title(),
             "type": "perspective",
@@ -51,7 +51,7 @@ async def knowledge_organizer(
         }
         question_group_id = f"{topic_id}-questions"
         groups[topic_id] = topic_node
-        groups[question_group_id] = {
+        question_group: dict[str, Any] = {
             "id": question_group_id,
             "label": f"{topic_node['label']} Questions",
             "type": "question_group",
@@ -59,6 +59,7 @@ async def knowledge_organizer(
             "claims": [],
             "evidence": [],
         }
+        groups[question_group_id] = question_group
         edges.append({"source": topic_id, "target": question_group_id, "relation": "contains"})
 
         for question in grouped_questions:
@@ -77,8 +78,8 @@ async def knowledge_organizer(
             }
             topic_node["claims"].extend(question_claims)
             topic_node["evidence"].extend(question_evidence)
-            groups[question_group_id]["claims"].extend(question_claims)
-            groups[question_group_id]["evidence"].extend(question_evidence)
+            question_group["claims"].extend(question_claims)
+            question_group["evidence"].extend(question_evidence)
             edges.append({"source": question_group_id, "target": concept_id, "relation": "groups"})
 
     return {

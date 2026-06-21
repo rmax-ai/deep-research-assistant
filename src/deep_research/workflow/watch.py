@@ -5,7 +5,6 @@ Supports delta detection: new sources, changed content, invalidated claims.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any, TypedDict
 
 

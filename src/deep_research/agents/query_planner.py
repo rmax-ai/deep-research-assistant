@@ -83,9 +83,9 @@ Generate search queries for this question."""
             temperature=0.2,
         )
         result = parse_json_response(response, default={"queries": []})
-        queries = result.get("queries", [])
+        queries = result.get("queries", []) if isinstance(result, dict) else []
         logger.info("query_planner: generated %d queries for %r", len(queries), question.get("text", "")[:60])
-        return queries
+        return queries if isinstance(queries, list) else _stub_queries(question)
     except Exception as exc:
         logger.error("query_planner failed: %s", exc)
         return _stub_queries(question)

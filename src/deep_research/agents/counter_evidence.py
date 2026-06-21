@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from deep_research.agents import generate_structured, is_llm_available
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,8 +52,6 @@ async def counter_evidence_agent(
         }
 
     # Try LLM path
-    from deep_research.agents.research_director import is_llm_available, generate_structured
-
     if is_llm_available():
         try:
             prompt = _build_counter_evidence_prompt(target_claims, ev)

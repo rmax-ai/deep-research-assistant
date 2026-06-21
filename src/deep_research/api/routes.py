@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from collections.abc import AsyncIterator
 from copy import deepcopy
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
+from google.adk.agents.base_agent import BaseAgent
 from google.adk.runners import InMemoryRunner
 from google.genai.types import Content, Part
 from pydantic import BaseModel, Field
@@ -107,12 +109,11 @@ def _sync_run_summary(run_data: dict[str, Any]) -> None:
 
 
 def _default_approval_inputs(mode: str) -> dict[str, dict[str, str]]:
-    status = "approved" if mode in {"review_first", "collaborative"} else "approved"
     return {
-        "A": {"status": status},
-        "B": {"status": status},
-        "C": {"status": status},
-        "D": {"status": status},
+        "A": {"status": "approved"},
+        "B": {"status": "approved"},
+        "C": {"status": "approved"},
+        "D": {"status": "approved"},
     }
 
 
@@ -139,7 +140,7 @@ async def create_research_run(request: CreateRunRequest) -> RunStatusResponse:
     )
     state["app:pending_interventions"] = list(request.constraints.get("interventions", []))
 
-    runner = InMemoryRunner(agent=_workflow, app_name="deep_research_api")
+    runner = InMemoryRunner(agent=cast(BaseAgent, _workflow), app_name="deep_research_api")
     await runner.session_service.create_session(
         app_name="deep_research_api",
         user_id=user_id,
@@ -274,7 +275,7 @@ async def get_research_events(run_id: str, since: str | None = None) -> Streamin
         await queue.put(event)
     await queue.put(None)
 
-    async def event_stream():
+    async def event_stream() -> AsyncIterator[str]:
         try:
             while True:
                 item = await queue.get()
@@ -291,7 +292,10 @@ async def get_research_events(run_id: str, since: str | None = None) -> Streamin
 async def get_concept_map(run_id: str) -> dict[str, Any]:
     """Return the projected topic graph."""
     run_data = _require_run(run_id)
-    return run_data.get("state", {}).get("app:concept_map", {"topic_nodes": [], "edges": [], "version": 0})
+    concept_map = run_data.get("state", {}).get("app:concept_map")
+    if isinstance(concept_map, dict):
+        return concept_map
+    return {"topic_nodes": [], "edges": [], "version": 0}
 
 
 @app.post("/v1/research-runs/{run_id}/interventions")

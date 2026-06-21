@@ -6,7 +6,7 @@ agent_role, purpose, policy_decision_id, delegated_scopes.
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 
 class Principal(TypedDict, total=False):
@@ -49,7 +49,7 @@ def get_current_principal(state: dict[str, Any] | None = None) -> Principal:
             "policy_decision_id": stored.get("policy_decision_id"),
             "delegated_scopes": list(stored.get("delegated_scopes", [])),
         }
-    return dict(_DEFAULT_PRINCIPAL)
+    return cast(Principal, dict(_DEFAULT_PRINCIPAL))
 
 
 def propagate_principal(

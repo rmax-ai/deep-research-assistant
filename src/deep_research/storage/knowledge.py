@@ -6,12 +6,20 @@ Claims enter new runs as hypotheses requiring freshness checks.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypedDict
 
 
-class KnowledgeRecord(dict):
+class KnowledgeRecord(TypedDict):
     """A published claim in the knowledge layer."""
-    pass
+    claim_id: str
+    claim_text: str
+    atomic_form: str
+    evidence_ids: list[str]
+    confidence: float
+    published_at: str
+    run_id: str
+    revalidated_at: str | None
+    still_valid: bool | None
 
 
 # In-memory knowledge store

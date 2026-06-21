@@ -16,8 +16,11 @@ from deep_research.nodes.budget import (
     summarize_budget_remaining,
 )
 from deep_research.nodes.coverage import calculate_coverage
+from deep_research.nodes.deduplication import cluster_sources, deduplicate_sources
 from deep_research.nodes.scheduler import select_frontier_questions
 from deep_research.nodes.scope import apply_scope_change
+from deep_research.policies.engine import evaluate_policy
+from deep_research.policies.identity import get_current_principal
 from deep_research.settings import get_settings
 from deep_research.telemetry.events import get_event_bus
 from deep_research.workflow.state import get_state
@@ -321,10 +324,6 @@ async def source_policy_apply(ctx: Context, node_input: Any) -> dict[str, Any]:
     if not sources:
         return {"accepted": 0, "rejected": 0, "message": "No sources to filter"}
 
-    from deep_research.nodes.deduplication import cluster_sources, deduplicate_sources
-    from deep_research.policies.identity import get_current_principal
-    from deep_research.policies.engine import evaluate_policy
-
     principal = get_current_principal(state)
 
     # Deduplicate by URL/title
@@ -338,7 +337,7 @@ async def source_policy_apply(ctx: Context, node_input: Any) -> dict[str, Any]:
     for src in sources:
         # Check policy for source retrieval
         decision = evaluate_policy(
-            principal,
+            dict(principal),
             action="source_retrieve",
             resource=str(src.get("canonical_uri", src.get("url", ""))),
             context={"stage": state.get("app:phase", "")},
@@ -349,8 +348,6 @@ async def source_policy_apply(ctx: Context, node_input: Any) -> dict[str, Any]:
 
         # Simple heuristics for source quality
         url = str(src.get("canonical_uri", src.get("url", "")))
-        title = str(src.get("title", ""))
-
         # Apply source constraints from scope
         scope = state.get("app:scope", {})
         source_constraints = scope.get("source_constraints", {})
