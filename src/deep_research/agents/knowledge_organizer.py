@@ -17,7 +17,7 @@ async def knowledge_organizer(
     questions: list[dict[str, Any]],
     claims: list[dict[str, Any]],
     evidence: list[dict[str, Any]],
-    model: str = "gemini-2.5-flash",
+    model: str = "gemini-3-flash-preview",
 ) -> dict[str, Any]:
     """Project research artifacts into a simple topic graph."""
     del model
