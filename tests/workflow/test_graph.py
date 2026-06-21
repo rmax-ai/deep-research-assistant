@@ -172,6 +172,51 @@ class TestWorkflowGraph:
         assert result["applied"] == 1
         assert "security" in get_state()["app:scope"]["included_topics"]
 
+    async def test_final_gate_rejection_stops_workflow_instead_of_repair_loop(self):
+        from deep_research.workflow.graph import final_gate_check
+        from deep_research.workflow.state import get_state, reset_state
+
+        reset_state()
+        state = get_state()
+        state.update(
+            {
+                "app:verification": {"blocking_findings": 0, "findings": [], "passed": True},
+                "app:drafts": [{"content": "Ready for publication"}],
+                "app:objective": {"intended_audience": "external"},
+                "app:approval_inputs": {"D": {"status": "rejected"}},
+            }
+        )
+
+        ctx = SimpleNamespace(route=None)
+        with pytest.raises(RuntimeError, match="Final publication approval was rejected"):
+            await final_gate_check(ctx, None)
+
+        assert ctx.route == 0
+        assert state["app:phase"] == "failed"
+        assert state["app:final_gate_result"]["status"] == "rejected"
+
+    async def test_repair_draft_stops_after_max_passes(self):
+        from deep_research.workflow.graph import repair_draft
+        from deep_research.workflow.state import get_state, reset_state
+
+        reset_state()
+        state = get_state()
+        state.update(
+            {
+                "app:verification": {
+                    "blocking_findings": 1,
+                    "findings": [{"severity": "blocking", "message": "Missing citation"}],
+                },
+                "app:repair_count": 2,
+                "app:drafts": [{"content": "Draft"}],
+            }
+        )
+
+        with pytest.raises(RuntimeError, match="Repair loop exceeded max passes"):
+            await repair_draft(SimpleNamespace(route=None), None)
+
+        assert state["app:phase"] == "failed"
+
 
 class TestScheduler:
     def test_highest_priority_question_selected(self):

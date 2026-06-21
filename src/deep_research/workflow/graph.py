@@ -988,13 +988,20 @@ async def repair_draft(ctx: Context, node_input: Any) -> dict[str, Any]:
     state = get_state()
     verification = state.get("app:verification", {})
     repair_count = state.get("app:repair_count", 0)
+    max_repair_passes = 2
+
+    if repair_count >= max_repair_passes:
+        state["app:phase"] = "failed"
+        raise RuntimeError(
+            f"Repair loop exceeded max passes ({max_repair_passes}) without reaching a publishable draft"
+        )
 
     from deep_research.nodes.verification import repair_loop
 
     repair_result = repair_loop(
         findings=verification.get("findings", []),
         drafts=state.get("app:drafts", []),
-        max_repairs=2,
+        max_repairs=max_repair_passes,
     )
 
     state["app:repair_count"] = repair_count + 1
@@ -1031,7 +1038,14 @@ async def final_gate_check(ctx: Context, node_input: Any) -> dict[str, Any]:
     state["app:final_report_preview"] = "\n\n".join(draft.get("content", "") for draft in drafts)[:500]
     gate = await check_gate("D", state, get_settings())
     state["app:last_gate_D"] = gate.model_dump()
-    return await _resolve_approval(ctx, gate, state)
+    result = await _resolve_approval(ctx, gate, state)
+    state["app:final_gate_result"] = result
+
+    if ctx.route == 0:
+        state["app:phase"] = "failed"
+        raise RuntimeError("Final publication approval was rejected")
+
+    return result
 
 
 async def render_output(ctx: Context, node_input: Any) -> dict[str, Any]:
