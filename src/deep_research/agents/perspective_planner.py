@@ -10,7 +10,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from deep_research.agents import generate_structured, is_llm_available, parse_json_response
+from deep_research.agents import (
+    generate_structured,
+    get_model_for_tier,
+    is_llm_available,
+    parse_json_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +73,7 @@ Return ONLY a JSON array of perspective objects. No markdown, no explanation.
 async def perspective_planner(
     scope: dict[str, Any],
     user_objective: str = "",
-    model: str = "gemini-2.5-pro",
+    model: str | None = None,
 ) -> list[dict[str, Any]]:
     """Generate research perspectives from scope.
 
@@ -95,7 +100,7 @@ Generate research perspectives for this topic."""
     try:
         response = await generate_structured(
             prompt=prompt,
-            model=model,
+            model=model or get_model_for_tier("reasoning"),
             system_instruction=PERSPECTIVE_PLANNER_INSTRUCTION,
             temperature=0.1,
         )

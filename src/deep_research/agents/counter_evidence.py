@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from deep_research.agents import generate_structured, is_llm_available
+from deep_research.agents import generate_structured, get_model_for_tier, is_llm_available
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ async def counter_evidence_agent(
             prompt = _build_counter_evidence_prompt(target_claims, ev)
             response = await generate_structured(
                 prompt,
-                model="gemini-2.5-flash",
+                model=get_model_for_tier("fast"),
                 temperature=0.2,
                 max_output_tokens=2048,
             )

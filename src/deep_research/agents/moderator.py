@@ -6,7 +6,12 @@ import logging
 from collections import Counter
 from typing import Any
 
-from deep_research.agents import generate_structured, is_llm_available, parse_json_response
+from deep_research.agents import (
+    generate_structured,
+    get_model_for_tier,
+    is_llm_available,
+    parse_json_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +116,7 @@ def _heuristic_result(state_data: dict[str, Any]) -> dict[str, Any]:
 
 async def moderator(
     state_data: dict[str, Any],
-    model: str = "gemini-2.5-flash",
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Assess the research frontier and suggest rebalancing actions."""
     heuristic = _heuristic_result(state_data)
@@ -128,7 +133,7 @@ async def moderator(
     try:
         response = await generate_structured(
             prompt=prompt,
-            model=model,
+            model=model or get_model_for_tier("fast"),
             system_instruction=MODERATOR_INSTRUCTION,
             temperature=0.1,
         )

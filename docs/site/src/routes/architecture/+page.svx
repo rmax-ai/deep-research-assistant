@@ -48,20 +48,20 @@ START
 
 | Agent | Responsibility | Model |
 |-------|---------------|-------|
-| Research Director | Scope interpretation, mode selection | gemini-2.5-flash |
-| Perspective Planner | Generate research lenses, budget allocation | gemini-2.5-flash |
-| Question Architect | Question graph generation, follow-ups | gemini-2.5-flash |
-| Research Moderator | Stagnation detection, frontier rebalancing | gemini-2.5-flash |
-| Query Planner | Search query decomposition (10 strategies) | gemini-2.5-flash |
-| Source Appraiser | Claim-relative source authority assessment | gemini-2.5-flash |
-| Evidence Curator | Exact excerpt extraction, qualifier preservation | gemini-2.5-flash |
-| Claim Builder | Atomic claim construction, epistemic status | gemini-2.5-flash |
-| Counter-Evidence Agent | Contradiction search, independence checks | gemini-2.5-flash |
-| Knowledge Organizer | Conceptual hierarchy, concept map projection | gemini-2.5-flash |
-| Outline Architect | Report structure from validated claims | gemini-2.5-flash |
-| Section Writer | Prose from claims only, blocked-if-missing | gemini-2.5-flash |
-| Verification Agent | Citation entailment, cross-section consistency | gemini-2.5-flash |
-| Executive Synthesizer | Concise executive synthesis | gemini-2.5-flash |
+| Research Director | Scope interpretation, mode selection | gemini-3-flash-preview |
+| Perspective Planner | Generate research lenses, budget allocation | gemini-3-flash-preview |
+| Question Architect | Question graph generation, follow-ups | gemini-3-flash-preview |
+| Research Moderator | Stagnation detection, frontier rebalancing | gemini-3-flash-preview |
+| Query Planner | Search query decomposition (10 strategies) | gemini-3-flash-preview |
+| Source Appraiser | Claim-relative source authority assessment | gemini-3-flash-preview |
+| Evidence Curator | Exact excerpt extraction, qualifier preservation | gemini-3-flash-preview |
+| Claim Builder | Atomic claim construction, epistemic status | gemini-3-flash-preview |
+| Counter-Evidence Agent | Contradiction search, independence checks | gemini-3-flash-preview |
+| Knowledge Organizer | Conceptual hierarchy, concept map projection | gemini-3-flash-preview |
+| Outline Architect | Report structure from validated claims | gemini-3-flash-preview |
+| Section Writer | Prose from claims only, blocked-if-missing | gemini-3-flash-preview |
+| Verification Agent | Citation entailment, cross-section consistency | gemini-3-flash-preview |
+| Executive Synthesizer | Concise executive synthesis | gemini-3-flash-preview |
 
 ### Deterministic Nodes (16 FunctionNodes)
 
@@ -114,8 +114,8 @@ ResearchRun
 
 | Tier | Use | Model |
 |------|-----|-------|
-| Fast | Query expansion, classification, extraction | gemini-2.5-flash |
-| Reasoning | Scope, questions, claims, contradictions | gemini-2.5-pro |
-| Verification | Citation entailment, causal overreach | gemini-2.5-flash (distinct prompt) |
+| Fast | Query expansion, classification, extraction | gemini-3-flash-preview |
+| Reasoning | Scope, questions, claims, contradictions | gemini-3-flash-preview |
+| Verification | Citation entailment, causal overreach | gemini-3-flash-preview (distinct prompt) |
 
 The verifier uses a distinct system prompt and lower temperature from the section writer to enforce the independence rule.

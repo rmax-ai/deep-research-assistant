@@ -10,7 +10,12 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
-from deep_research.agents import generate_structured, is_llm_available, parse_json_response
+from deep_research.agents import (
+    generate_structured,
+    get_model_for_tier,
+    is_llm_available,
+    parse_json_response,
+)
 from deep_research.nodes.budget import filter_evidence_for_section
 
 logger = logging.getLogger(__name__)
@@ -51,7 +56,7 @@ async def section_writer(
     section: dict[str, Any],
     claims: list[dict[str, Any]],
     evidence: list[dict[str, Any]] | None = None,
-    model: str = "gemini-2.5-pro",
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Generate prose for a report section from claims.
 
@@ -108,7 +113,7 @@ Write the section prose from these claims."""
     try:
         response = await generate_structured(
             prompt=prompt,
-            model=model,
+            model=model or get_model_for_tier("reasoning"),
             system_instruction=SECTION_WRITER_INSTRUCTION,
             temperature=0.2,
             max_output_tokens=4096,

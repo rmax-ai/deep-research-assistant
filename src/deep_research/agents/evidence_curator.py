@@ -9,7 +9,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from deep_research.agents import generate_structured, is_llm_available, parse_json_response
+from deep_research.agents import (
+    generate_structured,
+    get_model_for_tier,
+    is_llm_available,
+    parse_json_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +64,7 @@ async def evidence_curator(
     source_content: str,
     source_title: str = "",
     question: str = "",
-    model: str = "gemini-2.5-pro",
+    model: str | None = None,
 ) -> list[dict[str, Any]]:
     """Extract evidence fragments from source content.
 
@@ -91,7 +96,7 @@ async def evidence_curator(
     try:
         response = await generate_structured(
             prompt=prompt,
-            model=model,
+            model=model or get_model_for_tier("reasoning"),
             system_instruction=EVIDENCE_CURATOR_INSTRUCTION,
             temperature=0.1,
             max_output_tokens=4096,

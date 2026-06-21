@@ -153,6 +153,19 @@ class TestAgentInit:
 
         assert isinstance(is_llm_available(), bool)
 
+    def test_get_model_for_tier_uses_settings(self, monkeypatch: pytest.MonkeyPatch):
+        from deep_research.agents import get_model_for_tier
+        from deep_research.settings import get_settings
+
+        settings = get_settings()
+        monkeypatch.setattr(settings.models.fast, "model", "gemini-fast-test")
+        monkeypatch.setattr(settings.models.reasoning, "model", "gemini-reasoning-test")
+        monkeypatch.setattr(settings.models.verification, "model", "gemini-verification-test")
+
+        assert get_model_for_tier("fast") == "gemini-fast-test"
+        assert get_model_for_tier("reasoning") == "gemini-reasoning-test"
+        assert get_model_for_tier("verification") == "gemini-verification-test"
+
     def test_parse_json_code_fenced(self):
         from deep_research.agents import parse_json_response
 
@@ -200,3 +213,32 @@ class TestAgentInit:
 
         with pytest.raises(RuntimeError, match="timed out"):
             await generate_structured("Say OK", timeout_seconds=0.01)
+
+    @pytest.mark.asyncio
+    async def test_generate_structured_retries_when_json_is_truncated(self, monkeypatch: pytest.MonkeyPatch):
+        from deep_research.agents import generate_structured
+
+        calls: list[dict[str, object]] = []
+
+        class RetryModels:
+            @staticmethod
+            def generate_content(*args, **kwargs):
+                calls.append(kwargs)
+                if len(calls) == 1:
+                    return SimpleNamespace(text='```json\n{"questions": [\n  {"text": "A"')
+                return SimpleNamespace(text='{"questions": [{"text": "A"}]}')
+
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setattr("deep_research.agents.get_client", lambda: SimpleNamespace(models=RetryModels()))
+
+        result = await generate_structured("Generate questions", max_output_tokens=128, timeout_seconds=1)
+
+        assert result == '{"questions": [{"text": "A"}]}'
+        assert len(calls) == 2
+        assert calls[0]["config"]["max_output_tokens"] == 128
+        assert calls[1]["config"]["max_output_tokens"] == 256
+
+    def test_parse_json_detects_truncated_fence_as_invalid(self):
+        from deep_research.agents import parse_json_response
+
+        assert parse_json_response('```json\n{"questions": [\n  {"text": "A"') == {}

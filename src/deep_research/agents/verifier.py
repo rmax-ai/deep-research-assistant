@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from deep_research.agents import generate_structured, is_llm_available
+from deep_research.agents import generate_structured, get_model_for_tier, is_llm_available
 from deep_research.nodes.verification import verify_draft_citations
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ async def verifier(
             prompt = _build_verifier_prompt(drafts, claims)
             response = await generate_structured(
                 prompt,
-                model="gemini-2.5-flash",
+                model=get_model_for_tier("verification"),
                 temperature=0.1,  # Lower temperature than writer for precision
                 system_instruction=(
                     "You are a fact-checker and verification agent. "

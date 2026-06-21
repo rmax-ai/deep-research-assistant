@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import Any
+from typing import Any, Literal
 
 from deep_research.settings import get_settings
 
@@ -36,7 +36,7 @@ def is_llm_available() -> bool:
 
 async def generate_structured(
     prompt: str,
-    model: str = "gemini-2.5-pro",
+    model: str | None = None,
     system_instruction: str | None = None,
     temperature: float = 0.1,
     max_output_tokens: int = 4096,
@@ -46,7 +46,7 @@ async def generate_structured(
 
     Args:
         prompt: The user prompt / content to process.
-        model: Gemini model ID.
+        model: Gemini model ID. Defaults to the configured reasoning tier.
         system_instruction: Optional system-level instruction.
         temperature: Sampling temperature (0.0-1.0).
         max_output_tokens: Maximum tokens in response.
@@ -63,6 +63,7 @@ async def generate_structured(
             "GOOGLE_API_KEY not set. Set it to use LLM-backed agents."
         )
 
+    resolved_model = model or get_model_for_tier("reasoning")
     client = get_client()
     config: dict[str, object] = {
         "temperature": temperature,
@@ -75,18 +76,18 @@ async def generate_structured(
 
     response = await _invoke_model(
         client=client,
-        model=model,
+        model=resolved_model,
         prompt=prompt,
         config=config,
         timeout=timeout,
     )
     text = _extract_response_text(response)
-    if not text and _response_hit_max_tokens(response):
+    if _should_retry_structured_response(text, response):
         retry_config = dict(config)
         retry_config["max_output_tokens"] = max(int(max_output_tokens) * 2, 32)
         response = await _invoke_model(
             client=client,
-            model=model,
+            model=resolved_model,
             prompt=prompt,
             config=retry_config,
             timeout=timeout,
@@ -96,6 +97,13 @@ async def generate_structured(
     if not text:
         raise RuntimeError("Model returned no text content")
     return text
+
+
+def get_model_for_tier(tier: Literal["fast", "reasoning", "verification"]) -> str:
+    """Return the configured model identifier for a routing tier."""
+    settings = get_settings()
+    config = getattr(settings.models, tier)
+    return str(config.model_id)
 
 
 async def _invoke_model(
@@ -149,6 +157,59 @@ def _response_hit_max_tokens(response: Any) -> bool:
         return False
     finish_reason = getattr(candidates[0], "finish_reason", None)
     return str(finish_reason).endswith("MAX_TOKENS")
+
+
+def _should_retry_structured_response(text: str, response: Any) -> bool:
+    """Return whether a structured-output response warrants one retry."""
+    if not text:
+        return _response_hit_max_tokens(response)
+    return _looks_like_truncated_structured_output(text)
+
+
+def _looks_like_truncated_structured_output(text: str) -> bool:
+    """Heuristically detect truncated JSON or fenced JSON output."""
+    cleaned = text.strip()
+    if not cleaned:
+        return False
+
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        else:
+            return True
+        cleaned = "\n".join(lines).strip()
+
+    if not cleaned.startswith(("{", "[")):
+        return False
+
+    stack: list[str] = []
+    in_string = False
+    escape = False
+    for char in cleaned:
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char in "{[":
+            stack.append(char)
+        elif char == "}":
+            if not stack or stack.pop() != "{":
+                return False
+        elif char == "]":
+            if not stack or stack.pop() != "[":
+                return False
+
+    return in_string or bool(stack)
 
 
 def parse_json_response(text: str, default: Any = None) -> Any:

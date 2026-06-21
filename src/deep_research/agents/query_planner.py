@@ -9,7 +9,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from deep_research.agents import generate_structured, is_llm_available, parse_json_response
+from deep_research.agents import (
+    generate_structured,
+    get_model_for_tier,
+    is_llm_available,
+    parse_json_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +60,7 @@ Return ONLY a JSON object. No markdown, no explanation.
 
 async def query_planner(
     question: dict[str, Any],
-    model: str = "gemini-2.5-flash",
+    model: str | None = None,
 ) -> list[dict[str, Any]]:
     """Generate search queries for a research question.
 
@@ -78,7 +83,7 @@ Generate search queries for this question."""
     try:
         response = await generate_structured(
             prompt=prompt,
-            model=model,
+            model=model or get_model_for_tier("fast"),
             system_instruction=QUERY_PLANNER_INSTRUCTION,
             temperature=0.2,
         )

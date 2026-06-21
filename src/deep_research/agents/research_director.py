@@ -10,7 +10,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from deep_research.agents import generate_structured, is_llm_available, parse_json_response
+from deep_research.agents import (
+    generate_structured,
+    get_model_for_tier,
+    is_llm_available,
+    parse_json_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +121,7 @@ Return ONLY a JSON object. No markdown, no explanation outside the JSON.
 
 async def research_director(
     user_objective: str,
-    model: str = "gemini-2.5-pro",
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Interpret a user research objective and produce a structured plan.
 
@@ -137,7 +142,7 @@ async def research_director(
     try:
         response = await generate_structured(
             prompt=prompt,
-            model=model,
+            model=model or get_model_for_tier("reasoning"),
             system_instruction=RESEARCH_DIRECTOR_INSTRUCTION,
             temperature=0.1,
         )

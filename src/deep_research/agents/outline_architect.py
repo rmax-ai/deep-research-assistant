@@ -9,7 +9,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from deep_research.agents import generate_structured, is_llm_available, parse_json_response
+from deep_research.agents import (
+    generate_structured,
+    get_model_for_tier,
+    is_llm_available,
+    parse_json_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +71,7 @@ Return ONLY a JSON object. No markdown, no explanation.
 async def outline_architect(
     claims: list[dict[str, Any]],
     objective: dict[str, Any] | None = None,
-    model: str = "gemini-2.5-pro",
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Build a report outline from claims.
 
@@ -104,7 +109,7 @@ Create a structured outline from these claims."""
     try:
         response = await generate_structured(
             prompt=prompt,
-            model=model,
+            model=model or get_model_for_tier("reasoning"),
             system_instruction=OUTLINE_ARCHITECT_INSTRUCTION,
             temperature=0.1,
         )

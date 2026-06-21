@@ -19,7 +19,7 @@ class ModelConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="DEEP_RESEARCH_MODEL_")
 
     provider: str = "google"
-    model: str = ""
+    model: str = "gemini-3-flash-preview"
 
     @property
     def model_id(self) -> str:

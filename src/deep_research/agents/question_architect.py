@@ -9,7 +9,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from deep_research.agents import generate_structured, is_llm_available, parse_json_response
+from deep_research.agents import (
+    generate_structured,
+    get_model_for_tier,
+    is_llm_available,
+    parse_json_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +94,7 @@ Return ONLY a JSON object:
 async def question_architect(
     perspectives: list[dict[str, Any]],
     scope: dict[str, Any] | None = None,
-    model: str = "gemini-2.5-flash",
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Generate a question graph from research perspectives.
 
@@ -121,7 +126,7 @@ Generate research questions for these perspectives."""
     try:
         response = await generate_structured(
             prompt=prompt,
-            model=model,
+            model=model or get_model_for_tier("fast"),
             system_instruction=QUESTION_ARCHITECT_INSTRUCTION,
             temperature=0.2,
         )
@@ -211,7 +216,7 @@ async def generate_follow_ups(
     evidence: list[dict[str, Any]],
     parent_question: dict[str, Any],
     existing_questions: list[dict[str, Any]],
-    model: str = "gemini-2.5-flash",
+    model: str | None = None,
 ) -> list[dict[str, Any]]:
     """Generate evidence-conditioned follow-up questions."""
     heuristic = _heuristic_follow_ups(evidence, parent_question, existing_questions)
@@ -227,7 +232,7 @@ async def generate_follow_ups(
     try:
         response = await generate_structured(
             prompt=prompt,
-            model=model,
+            model=model or get_model_for_tier("fast"),
             system_instruction=FOLLOW_UP_INSTRUCTION,
             temperature=0.2,
         )

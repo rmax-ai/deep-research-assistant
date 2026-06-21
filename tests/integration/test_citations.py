@@ -9,7 +9,7 @@ import os
 import pytest
 
 LLM_AVAILABLE = bool(os.environ.get("GOOGLE_API_KEY"))
-LIVE_MODEL = os.environ.get("LIVE_VALIDATION_MODEL", "gemini-2.5-flash")
+LIVE_MODEL = os.environ.get("LIVE_VALIDATION_MODEL", "gemini-3-flash-preview")
 
 
 @pytest.mark.asyncio
