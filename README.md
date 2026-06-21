@@ -105,6 +105,29 @@ See [`docs/ROADMAP.md`](docs/ROADMAP.md) for detailed deliverables per phase.
 - **Linting:** ruff (format + check) + mypy strict
 - **Observability:** OpenTelemetry + structlog
 
+## Validation
+
+Default validation is deterministic and always-on:
+
+```bash
+uv run ruff check src tests
+uv run mypy src/deep_research
+uv run pytest
+```
+
+Live Gemini validation is opt-in and bounded:
+
+```bash
+source .envrc
+uv run pytest -m live_llm
+```
+
+The live suite validates real Gemini-backed agent behavior and a bounded workflow smoke with stubbed search/retrieval. It does not attempt a fully live internet-backed end-to-end research run by default.
+
+GitHub Actions mirrors this split:
+- `CI` runs deterministic checks on pushes and pull requests
+- `Live Validation` is a separate manual workflow (`workflow_dispatch`) that requires `GOOGLE_API_KEY`
+
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.

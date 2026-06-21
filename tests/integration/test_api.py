@@ -43,6 +43,33 @@ async def client():
 
 @pytest.mark.asyncio
 class TestAPIHealth:
+    async def test_route_inventory_matches_supported_surface(self, client):
+        del client
+        expected = {
+            ("GET", "/health"),
+            ("POST", "/v1/research-runs"),
+            ("GET", "/v1/research-runs/{run_id}"),
+            ("GET", "/v1/research-runs/{run_id}/graph"),
+            ("GET", "/v1/research-runs/{run_id}/frontier"),
+            ("GET", "/v1/research-runs/{run_id}/progress"),
+            ("GET", "/v1/research-runs/{run_id}/events"),
+            ("GET", "/v1/research-runs/{run_id}/concept-map"),
+            ("POST", "/v1/research-runs/{run_id}/interventions"),
+            ("POST", "/v1/research-runs/{run_id}/approvals/{approval_id}"),
+            ("GET", "/v1/research-runs/{run_id}/approvals"),
+            ("POST", "/v1/research-runs/{run_id}/exports"),
+        }
+
+        actual = set()
+        for route in app.routes:
+            path = getattr(route, "path", "")
+            methods = getattr(route, "methods", set())
+            if path == "/health" or path.startswith("/v1/"):
+                for method in methods - {"HEAD", "OPTIONS"}:
+                    actual.add((method, path))
+
+        assert actual == expected
+
     async def test_health(self, client):
         response = await client.get("/health")
         assert response.status_code == 200

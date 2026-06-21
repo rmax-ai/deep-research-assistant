@@ -1,0 +1,52 @@
+name: Live Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Live validation suite to run
+        required: true
+        default: all
+        type: choice
+        options:
+          - agent_smoke
+          - bounded_workflow
+          - all
+      model:
+        description: Gemini model for live validation
+        required: false
+        default: gemini-2.5-flash
+        type: string
+
+jobs:
+  live-validate:
+    runs-on: ubuntu-latest
+    env:
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      LIVE_VALIDATION_MODEL: ${{ inputs.model }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v4
+      - name: Require Google API key
+        run: |
+          if [ -z "$GOOGLE_API_KEY" ]; then
+            echo "GOOGLE_API_KEY secret is required for live validation." >&2
+            exit 1
+          fi
+      - run: uv sync --extra dev
+      - name: Run live agent smoke
+        if: ${{ inputs.suite == 'agent_smoke' || inputs.suite == 'all' }}
+        run: uv run pytest -m "live_agent_smoke"
+      - name: Run bounded live workflow
+        if: ${{ inputs.suite == 'bounded_workflow' || inputs.suite == 'all' }}
+        run: uv run pytest -m "live_bounded_workflow"
+      - name: Upload pytest cache and logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-validation-artifacts
+          path: |
+            .pytest_cache

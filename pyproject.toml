@@ -95,3 +95,8 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
 addopts = ["-v", "--tb=short", "--strict-markers"]
+markers = [
+    "live_llm: requires a real Gemini API key",
+    "live_agent_smoke: bounded live validation for core model-backed agents",
+    "live_bounded_workflow: bounded live validation for the workflow graph with stubbed search",
+]
