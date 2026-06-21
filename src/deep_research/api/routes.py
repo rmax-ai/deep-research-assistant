@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from deep_research.nodes.scope import apply_scope_change
 from deep_research.storage.database import close_database, init_database
-from deep_research.storage.repositories import create_run, get_run, update_run
+from deep_research.storage.repositories import create_run, get_run, list_runs, update_run
 from deep_research.telemetry import configure_logging
 from deep_research.telemetry.events import get_event_bus
 from deep_research.workflow.graph import build_research_workflow
@@ -35,7 +35,9 @@ logger = logging.getLogger(__name__)
 async def lifespan(_app: FastAPI):
     """Initialize and dispose app-scoped resources."""
     await init_database()
+    await _resume_incomplete_runs()
     yield
+    await _cancel_background_tasks()
     await close_database()
 
 
@@ -125,8 +127,10 @@ async def _require_run(run_id: str) -> dict[str, Any]:
 
 def _sync_run_summary(run_data: dict[str, Any]) -> None:
     state = run_data.get("state", {})
-    run_data["objective"] = state.get("app:objective", {})
-    run_data["scope"] = state.get("app:scope", {})
+    state_objective = state.get("app:objective", {})
+    state_scope = state.get("app:scope", {})
+    run_data["objective"] = state_objective if state_objective else run_data.get("objective", {})
+    run_data["scope"] = state_scope if state_scope else run_data.get("scope", {})
     run_data["questions_count"] = len(state.get("app:questions", []))
     run_data["claims_count"] = len(state.get("app:claims", []))
     run_data["sources_count"] = len(state.get("app:sources", []))
@@ -157,6 +161,81 @@ def _build_objective_text(request: ObjectiveRequest) -> str:
     if request.intended_audience:
         objective_text += f"\n\nAudience: {', '.join(request.intended_audience)}"
     return objective_text
+
+
+def _objective_text_from_run_data(run_data: dict[str, Any]) -> str:
+    state = run_data.get("state", {})
+    if isinstance(state, dict):
+        text = state.get("app:initial_objective_text")
+        if isinstance(text, str) and text.strip():
+            return text
+
+    objective = run_data.get("objective", {})
+    if isinstance(objective, dict):
+        primary_question = objective.get("primary_question")
+        if isinstance(primary_question, str) and primary_question.strip():
+            text = primary_question
+            decision = objective.get("decision_to_support")
+            if isinstance(decision, str) and decision.strip():
+                text += f"\n\nDecision to support: {decision}"
+            audience = objective.get("intended_audience")
+            if isinstance(audience, list) and audience:
+                audience_values = [str(item) for item in audience if str(item).strip()]
+                if audience_values:
+                    text += f"\n\nAudience: {', '.join(audience_values)}"
+            return text
+    return ""
+
+
+async def _cancel_background_tasks() -> None:
+    tasks = list(_run_tasks.values())
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    _run_tasks.clear()
+
+
+def _schedule_run_execution(run_data: dict[str, Any], *, resumed: bool = False) -> None:
+    run_id = str(run_data["run_id"])
+    if run_id in _run_tasks:
+        return
+
+    state = run_data.setdefault("state", {})
+    session_id = str(run_data.get("session_id", f"session_{run_id}"))
+    objective_text = _objective_text_from_run_data(run_data)
+    if not objective_text:
+        logger.warning("skipping run resume without objective text", extra={"run_id": run_id})
+        return
+
+    if resumed:
+        run_data["status"] = "queued"
+        run_data["phase"] = str(state.get("app:phase", run_data.get("phase", "planning")))
+        run_data["completed_at"] = None
+        run_data["error"] = None
+        state["app:resumed_after_restart"] = True
+
+    _active_runs[run_id] = run_data
+    _run_tasks[run_id] = asyncio.create_task(
+        _execute_research_run(
+            run_id=run_id,
+            session_id=session_id,
+            user_id="api_user",
+            objective_text=objective_text,
+            state=state,
+        )
+    )
+
+
+async def _resume_incomplete_runs() -> None:
+    persisted_runs = await list_runs(statuses=["queued", "running"])
+    for run_data in persisted_runs:
+        run_id = str(run_data["run_id"])
+        logger.info(
+            "requeueing persisted run on startup",
+            extra={"run_id": run_id, "status": run_data.get("status", "queued")},
+        )
+        _schedule_run_execution(run_data, resumed=True)
 
 
 async def _execute_research_run(
@@ -259,8 +338,6 @@ async def create_research_run(request: CreateRunRequest) -> RunStatusResponse:
     """Create a new research run and execute it asynchronously."""
     run_id = str(uuid.uuid4())[:8]
     session_id = f"session_{run_id}"
-    user_id = "api_user"
-
     state: dict[str, Any] = {}
     state["app:run_id"] = run_id
     state["app:run_mode"] = request.mode
@@ -269,6 +346,7 @@ async def create_research_run(request: CreateRunRequest) -> RunStatusResponse:
         request.constraints.get("approval_inputs", _default_approval_inputs(request.mode))
     )
     state["app:pending_interventions"] = list(request.constraints.get("interventions", []))
+    state["app:initial_objective_text"] = _build_objective_text(request.objective)
     run_data = {
         "run_id": run_id,
         "session_id": session_id,
@@ -281,18 +359,11 @@ async def create_research_run(request: CreateRunRequest) -> RunStatusResponse:
         "approvals": {},
         "interventions": list(state.get("app:pending_interventions", [])),
         "created_at": _now(),
+        "objective": request.objective.model_dump(),
+        "scope": {},
     }
     await _persist_run(run_data, create=True)
-    _active_runs[run_id] = run_data
-    _run_tasks[run_id] = asyncio.create_task(
-        _execute_research_run(
-            run_id=run_id,
-            session_id=session_id,
-            user_id=user_id,
-            objective_text=_build_objective_text(request.objective),
-            state=state,
-        )
-    )
+    _schedule_run_execution(run_data)
 
     return RunStatusResponse(
         run_id=run_id,

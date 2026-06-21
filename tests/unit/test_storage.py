@@ -73,3 +73,52 @@ async def test_get_run_returns_none_for_unknown_id(sqlite_run_store):
     from deep_research.storage.repositories import get_run
 
     assert await get_run("missing") is None
+
+
+@pytest.mark.asyncio
+async def test_list_runs_filters_by_status(sqlite_run_store):
+    from deep_research.storage.repositories import create_run, list_runs
+
+    await create_run(
+        {
+            "run_id": "run-queued",
+            "session_id": "session-run-queued",
+            "status": "queued",
+            "phase": "planning",
+            "report": "",
+            "event_count": 0,
+            "events": [],
+            "state": {"app:run_id": "run-queued"},
+            "approvals": {},
+            "interventions": [],
+            "created_at": "2026-06-21T00:00:00+00:00",
+            "objective": {"title": "Queued"},
+            "scope": {},
+            "questions_count": 0,
+            "claims_count": 0,
+            "sources_count": 0,
+        }
+    )
+    await create_run(
+        {
+            "run_id": "run-completed",
+            "session_id": "session-run-completed",
+            "status": "completed",
+            "phase": "completed",
+            "report": "done",
+            "event_count": 0,
+            "events": [],
+            "state": {"app:run_id": "run-completed"},
+            "approvals": {},
+            "interventions": [],
+            "created_at": "2026-06-21T00:00:00+00:00",
+            "objective": {"title": "Done"},
+            "scope": {},
+            "questions_count": 0,
+            "claims_count": 0,
+            "sources_count": 0,
+        }
+    )
+
+    queued = await list_runs(statuses=["queued"])
+    assert [run["run_id"] for run in queued] == ["run-queued"]

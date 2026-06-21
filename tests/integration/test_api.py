@@ -252,6 +252,55 @@ class TestGetRun:
         assert persisted["status"] == "failed"
         assert persisted["error"] == "forced workflow failure"
 
+    async def test_startup_requeues_persisted_queued_run(self, client):
+        create_resp = await client.post(
+            "/v1/research-runs",
+            json={"objective": {"title": "Resume Queued", "primary_question": "Resume me after restart"}},
+            timeout=60,
+        )
+        run_id = create_resp.json()["run_id"]
+
+        await _cancel_background_tasks()
+        routes._active_runs.clear()
+
+        persisted = await routes.get_run(run_id)
+        assert persisted is not None
+        assert persisted["status"] in {"queued", "running"}
+
+        await routes._resume_incomplete_runs()
+        assert run_id in routes._run_tasks
+
+        completed = await _wait_for_run_completion(client, run_id)
+        assert completed["status"] == "completed"
+
+    async def test_startup_requeues_persisted_running_run(self, client):
+        create_resp = await client.post(
+            "/v1/research-runs",
+            json={"objective": {"title": "Resume Running", "primary_question": "Treat running as resumable"}},
+            timeout=60,
+        )
+        run_id = create_resp.json()["run_id"]
+
+        await _cancel_background_tasks()
+        routes._active_runs.clear()
+        persisted = await routes.get_run(run_id)
+        assert persisted is not None
+
+        await routes.update_run(
+            run_id,
+            {
+                **persisted,
+                "status": "running",
+                "phase": "researching",
+            },
+        )
+
+        await routes._resume_incomplete_runs()
+        assert run_id in routes._run_tasks
+
+        completed = await _wait_for_run_completion(client, run_id)
+        assert completed["status"] == "completed"
+
 
 @pytest.mark.asyncio
 class TestCollaborationEndpoints:

@@ -91,6 +91,18 @@ async def get_run(run_id: str) -> dict[str, Any] | None:
     raise RuntimeError("database session unavailable")
 
 
+async def list_runs(*, statuses: list[str] | None = None) -> list[dict[str, Any]]:
+    """List persisted runs, optionally filtered by status."""
+    async for session in get_session():
+        stmt = select(ResearchRunRecord)
+        if statuses:
+            stmt = stmt.where(ResearchRunRecord.status.in_(statuses))
+        result = await session.execute(stmt)
+        records = result.scalars().all()
+        return [_record_to_run_data(record) for record in records]
+    raise RuntimeError("database session unavailable")
+
+
 async def update_run(run_id: str, run_data: dict[str, Any]) -> dict[str, Any]:
     """Update a persisted run row."""
     payload = dict(run_data)
