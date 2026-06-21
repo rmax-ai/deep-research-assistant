@@ -1,6 +1,6 @@
 ---
 title: Deep Research Assistant
-description: Enterprise-grade governed AI research runtime
+description: Governed multi-agent research workflow for evidence-backed analysis
 ---
 
 <script>
@@ -9,261 +9,605 @@ description: Enterprise-grade governed AI research runtime
 
 <svelte:head>
   <title>Deep Research Assistant</title>
-  <meta name="description" content="Enterprise-grade governed AI research runtime built on Google ADK 2.0" />
+  <meta
+    name="description"
+    content="A governed multi-agent research runtime that turns broad objectives into evidence, claims, approvals, and publishable reports."
+  />
 </svelte:head>
 
-<div class="hero">
-  <div class="pulse"></div>
-  <h1>Deep Research Assistant</h1>
-  <p class="subtitle">Enterprise-grade governed AI research runtime</p>
-  <p class="desc">
-    Converts broad research requests into governed, inspectable, and reproducible research workflows.
-    Built on <strong>Google ADK 2.0</strong> with a STORM-inspired multi-agent pipeline.
-  </p>
-  <div class="ctas">
-    <a href={base + "/architecture/"} class="btn primary">Architecture</a>
-    <a href="https://github.com/rmax-ai/deep-research-assistant" class="btn secondary">GitHub</a>
-  </div>
-</div>
-
-<div class="features">
-  <div class="feature-card">
-    <div class="icon cyan">◇</div>
-    <h3>Evidence-First Pipeline</h3>
-    <p>
-      Intent → scope → perspectives → questions → search → evidence → claims → contradictions → outline → drafts → verification → report.
-      Every claim is traceable to source excerpts.
+<section class="hero">
+  <div class="hero-copy">
+    <div class="eyebrow">Governed research runtime</div>
+    <h1>Research that can be inspected, challenged, approved, and shipped.</h1>
+    <p class="lede">
+      Deep Research Assistant turns a vague research request into a bounded workflow with explicit
+      scope, question graphs, evidence fragments, claim records, approval gates, and a final report
+      that can be reviewed like engineering output instead of chat history.
     </p>
+    <div class="hero-actions">
+      <a href={base + "/api/"} class="btn primary">Explore API Surface</a>
+      <a href={base + "/architecture/"} class="btn secondary">Read Architecture</a>
+    </div>
+    <div class="hero-note">
+      Built on Google ADK 2.0 with deterministic workflow nodes and bounded Gemini-backed agents.
+    </div>
   </div>
-  <div class="feature-card">
-    <div class="icon emerald">◆</div>
-    <h3>STORM-Grade Iteration</h3>
-    <p>
-      Evidence-conditioned follow-up questions, frontier scheduling with priority scoring,
-      information-gain metrics, and a Research Moderator that detects stagnation.
-    </p>
-  </div>
-  <div class="feature-card">
-    <div class="icon violet">⬡</div>
-    <h3>Governed by Default</h3>
-    <p>
-      Identity propagation, policy engine with role-based tool allowlists, immutable audit log,
-      approval gates at semantic boundaries. Designed for enterprise from day one.
-    </p>
-  </div>
-</div>
 
-<div class="stats">
-  <div class="stat">
-    <div class="stat-num">46</div>
-    <div class="stat-label">Stories across 7 phases</div>
+  <div class="hero-panel">
+    <div class="panel-header">
+      <span class="dot coral"></span>
+      <span class="dot gold"></span>
+      <span class="dot teal"></span>
+      <strong>review_first run</strong>
+    </div>
+    <div class="panel-grid">
+      <div>
+        <span class="mini-label">Objective</span>
+        <p>Assess enterprise controls for an AI research runtime.</p>
+      </div>
+      <div>
+        <span class="mini-label">Mode</span>
+        <p><code>review_first</code></p>
+      </div>
+      <div>
+        <span class="mini-label">Evidence</span>
+        <p>Immutable excerpts with source and question linkage.</p>
+      </div>
+      <div>
+        <span class="mini-label">Claims</span>
+        <p>Atomic, qualified, and attached to evidence ids.</p>
+      </div>
+      <div>
+        <span class="mini-label">Approvals</span>
+        <p>Scope, plan, outline, and publication gates.</p>
+      </div>
+      <div>
+        <span class="mini-label">Output</span>
+        <p>Report draft plus progress, graph, events, and exports.</p>
+      </div>
+    </div>
   </div>
-  <div class="stat">
-    <div class="stat-num">82+</div>
-    <div class="stat-label">Tests passing</div>
-  </div>
-  <div class="stat">
-    <div class="stat-num">14</div>
-    <div class="stat-label">LLM Agents</div>
-  </div>
-  <div class="stat">
-    <div class="stat-num">30</div>
-    <div class="stat-label">Workflow Nodes</div>
-  </div>
-</div>
+</section>
 
-<div class="phase-grid">
-  <h2>Implementation Phases</h2>
-  <div class="phase-row done"><span>0</span> Architecture Spike</div>
-  <div class="phase-row done"><span>1</span> Evidence-First MVP</div>
-  <div class="phase-row done"><span>2</span> STORM-Grade Iterative Research</div>
-  <div class="phase-row done"><span>3</span> Co-STORM Collaboration</div>
-  <div class="phase-row done"><span>4</span> Epistemic Reliability</div>
-  <div class="phase-row done"><span>5</span> Enterprise Governance</div>
-  <div class="phase-row done"><span>6</span> Continuous Research</div>
-</div>
+<section class="signal-band">
+  <div class="signal-card">
+    <span>Why it exists</span>
+    <p>Most “research agents” produce prose. This one produces inspectable work products.</p>
+  </div>
+  <div class="signal-card">
+    <span>Core promise</span>
+    <p>Every material statement should trace back to evidence, not prompt theater.</p>
+  </div>
+  <div class="signal-card">
+    <span>Target use</span>
+    <p>Technical reviews, architecture analysis, governance-heavy research, and decision support.</p>
+  </div>
+</section>
+
+<section class="feature-section">
+  <div class="section-heading">
+    <div class="eyebrow">Product features</div>
+    <h2>Everything important in the workflow is first-class.</h2>
+  </div>
+
+  <div class="feature-grid">
+    <article class="feature">
+      <h3>Evidence-first pipeline</h3>
+      <p>
+        Intent becomes scope, perspectives, questions, search plans, evidence fragments, claims,
+        contradictions, drafts, verification findings, and report output. The workflow is explicit
+        at every stage.
+      </p>
+    </article>
+
+    <article class="feature">
+      <h3>Bounded multi-agent design</h3>
+      <p>
+        Research Director, Evidence Curator, Claim Builder, Verifier, Moderator, and supporting
+        agents each have narrow responsibilities instead of sharing one opaque prompt.
+      </p>
+    </article>
+
+    <article class="feature">
+      <h3>Approval-aware operation</h3>
+      <p>
+        Review gates are built into the graph, not bolted on later. Runs can pause at semantic
+        boundaries before scope expansion, outline approval, or publication.
+      </p>
+    </article>
+
+    <article class="feature">
+      <h3>Routeable API surface</h3>
+      <p>
+        The service exposes create/get run endpoints plus graph, frontier, progress, events,
+        concept map, approvals, interventions, and exports for integration into real systems.
+      </p>
+    </article>
+
+    <article class="feature">
+      <h3>Deterministic validation</h3>
+      <p>
+        Route contracts, workflow behavior, and quality gates run in normal CI. Live Gemini checks
+        stay opt-in and bounded so cost and flake do not leak into every push.
+      </p>
+    </article>
+
+    <article class="feature">
+      <h3>Enterprise control plane</h3>
+      <p>
+        Identity propagation, policy checks, source filtering, budget accounting, telemetry, and
+        append-only audit events are all part of the system design.
+      </p>
+    </article>
+  </div>
+</section>
+
+<section class="workflow-section">
+  <div class="section-heading">
+    <div class="eyebrow">Workflow</div>
+    <h2>From broad prompt to reviewable artifact.</h2>
+  </div>
+
+  <div class="workflow-track">
+    <div class="step"><span>01</span> Scope and objective proposal</div>
+    <div class="step"><span>02</span> Perspective and question graph generation</div>
+    <div class="step"><span>03</span> Search planning and source intake</div>
+    <div class="step"><span>04</span> Evidence extraction and claim construction</div>
+    <div class="step"><span>05</span> Contradiction checks and coverage review</div>
+    <div class="step"><span>06</span> Outline, drafting, verification, approval, export</div>
+  </div>
+</section>
+
+<section class="split-panel">
+  <div class="split-copy">
+    <div class="eyebrow">For builders</div>
+    <h2>Built to plug into product and ops surfaces, not just demos.</h2>
+    <p>
+      The project already documents and tests the API endpoints that matter for orchestration:
+      run creation, run retrieval, graph inspection, frontier visibility, event replay, approval
+      state, interventions, and export.
+    </p>
+    <a href={base + "/api/"} class="text-link">See the documented routes →</a>
+  </div>
+
+  <div class="api-card">
+    <div class="api-row"><strong>POST</strong><code>/v1/research-runs</code></div>
+    <div class="api-row"><strong>GET</strong><code>/v1/research-runs/{'{'}run_id{'}'}</code></div>
+    <div class="api-row"><strong>GET</strong><code>/graph</code> <code>/frontier</code> <code>/progress</code></div>
+    <div class="api-row"><strong>GET</strong><code>/events</code> <code>/concept-map</code></div>
+    <div class="api-row"><strong>POST</strong><code>/interventions</code> <code>/exports</code></div>
+    <div class="api-row"><strong>GET/POST</strong><code>/approvals</code></div>
+  </div>
+</section>
+
+<section class="feature-section accent">
+  <div class="section-heading">
+    <div class="eyebrow">Why this is different</div>
+    <h2>It advertises rigor, not just autonomy.</h2>
+  </div>
+
+  <div class="comparison-grid">
+    <div class="comparison-card good">
+      <h3>Deep Research Assistant</h3>
+      <ul>
+        <li>Claims are explicit records</li>
+        <li>Evidence stays immutable</li>
+        <li>Workflow events are inspectable</li>
+        <li>Approvals are modeled in the graph</li>
+        <li>Validation is split between deterministic and live tiers</li>
+      </ul>
+    </div>
+
+    <div class="comparison-card caution">
+      <h3>Typical agent demos</h3>
+      <ul>
+        <li>Prompt in, prose out</li>
+        <li>Weak traceability to sources</li>
+        <li>Little state visibility</li>
+        <li>Governance handled outside the workflow</li>
+        <li>Live dependencies mixed into normal CI</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="cta-strip">
+  <div>
+    <div class="eyebrow">Next steps</div>
+    <h2>Read the design, inspect the API, or validate the live path yourself.</h2>
+  </div>
+  <div class="hero-actions">
+    <a href={base + "/phases/"} class="btn primary">See Implementation Phases</a>
+    <a href="https://github.com/rmax-ai/deep-research-assistant" class="btn secondary">Open GitHub</a>
+  </div>
+</section>
 
 <style>
-  .hero {
-    text-align: center;
-    padding: 5rem 1.5rem 3rem;
-    max-width: 720px;
+  .hero,
+  .signal-band,
+  .feature-section,
+  .workflow-section,
+  .split-panel,
+  .cta-strip {
+    width: min(1180px, calc(100vw - 2rem));
     margin: 0 auto;
-    position: relative;
   }
 
-  .pulse {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: #22d3ee;
-    margin: 0 auto 1.5rem;
-    animation: pulse 2s ease-in-out infinite;
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.95fr);
+    gap: 2rem;
+    padding: 4.5rem 0 3rem;
+    align-items: center;
   }
 
-  @keyframes pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.4; transform: scale(1.5); }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(171, 110, 72, 0.18);
+    color: #9a4f2d;
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-weight: 700;
+  }
+
+  .hero h1,
+  .section-heading h2,
+  .split-copy h2,
+  .cta-strip h2 {
+    font-family: "Space Grotesk", "Inter", sans-serif;
+    letter-spacing: -0.05em;
+    line-height: 0.95;
   }
 
   .hero h1 {
-    font-size: 2.75rem;
-    margin-bottom: 0.5rem;
-    background: linear-gradient(135deg, #22d3ee, #a78bfa);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    font-size: clamp(3rem, 7vw, 5.75rem);
+    margin: 1rem 0 1.25rem;
+    max-width: 11ch;
+    color: #14213d;
   }
 
-  .subtitle {
-    font-size: 1.15rem;
-    color: #94a3b8;
-    margin-bottom: 0.75rem;
+  .lede {
+    font-size: 1.08rem;
+    line-height: 1.8;
+    max-width: 62ch;
+    color: #4d5d72;
   }
 
-  .desc {
-    font-size: 1rem;
-    color: #64748b;
-    line-height: 1.7;
-  }
-
-  .ctas {
-    margin-top: 2rem;
+  .hero-actions {
     display: flex;
-    gap: 1rem;
-    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.9rem;
+    margin-top: 1.7rem;
+  }
+
+  .hero-note {
+    margin-top: 1rem;
+    color: #7e6d62;
+    font-size: 0.92rem;
   }
 
   .btn {
-    padding: 0.6rem 1.5rem;
-    border-radius: 8px;
-    font-weight: 600;
-    font-size: 0.9rem;
-    text-decoration: none !important;
-    transition: all 0.15s;
-  }
-
-  .btn.primary {
-    background: #22d3ee;
-    color: #020617;
-  }
-
-  .btn.primary:hover {
-    background: #67e8f9;
-  }
-
-  .btn.secondary {
-    border: 1px solid #334155;
-    color: #94a3b8;
-  }
-
-  .btn.secondary:hover {
-    border-color: #22d3ee;
-    color: #e2e8f0;
-  }
-
-  .features {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 1.5rem;
-    max-width: 960px;
-    margin: 2rem auto;
-    padding: 0 1.5rem;
-  }
-
-  .feature-card {
-    background: rgba(15, 23, 42, 0.6);
-    border: 1px solid #1e293b;
-    border-radius: 12px;
-    padding: 1.5rem;
-  }
-
-  .feature-card:hover {
-    border-color: #334155;
-  }
-
-  .icon {
-    font-size: 1.5rem;
-    margin-bottom: 0.75rem;
-  }
-
-  .icon.cyan { color: #22d3ee; }
-  .icon.emerald { color: #34d399; }
-  .icon.violet { color: #a78bfa; }
-
-  .feature-card h3 {
-    font-size: 1rem;
-    margin-bottom: 0.5rem;
-    color: #e2e8f0;
-    border: none;
-  }
-
-  .feature-card p {
-    font-size: 0.85rem;
-    color: #64748b;
-    line-height: 1.6;
-  }
-
-  .stats {
-    display: flex;
-    justify-content: center;
-    gap: 3rem;
-    max-width: 720px;
-    margin: 3rem auto;
-    padding: 1.5rem;
-    border-top: 1px solid #1e293b;
-    border-bottom: 1px solid #1e293b;
-  }
-
-  .stat-num {
-    font-family: "JetBrains Mono", monospace;
-    font-size: 2rem;
-    font-weight: 700;
-    color: #22d3ee;
-  }
-
-  .stat-label {
-    font-size: 0.75rem;
-    color: #64748b;
-    margin-top: 0.25rem;
-  }
-
-  .phase-grid {
-    max-width: 520px;
-    margin: 2rem auto 4rem;
-    padding: 0 1.5rem;
-  }
-
-  .phase-grid h2 {
-    text-align: center;
-    margin-bottom: 1.25rem;
-  }
-
-  .phase-row {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.5rem 0.75rem;
-    border-radius: 6px;
-    font-size: 0.875rem;
-    color: #475569;
-  }
-
-  .phase-row.done {
-    color: #94a3b8;
-  }
-
-  .phase-row span {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    background: rgba(34, 211, 238, 0.15);
-    color: #22d3ee;
-    font-family: "JetBrains Mono", monospace;
-    font-size: 0.7rem;
+    min-height: 2.9rem;
+    padding: 0.7rem 1.2rem;
+    border-radius: 999px;
     font-weight: 700;
+    text-decoration: none !important;
+    transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease;
+  }
+
+  .btn:hover {
+    transform: translateY(-1px);
+  }
+
+  .btn.primary {
+    background: linear-gradient(135deg, #d66f45, #efb45b);
+    color: white;
+    box-shadow: 0 14px 28px rgba(214, 111, 69, 0.22);
+  }
+
+  .btn.secondary {
+    background: rgba(255, 255, 255, 0.66);
+    color: #16324f;
+    border: 1px solid rgba(22, 50, 79, 0.12);
+  }
+
+  .hero-panel,
+  .signal-card,
+  .feature,
+  .api-card,
+  .comparison-card {
+    background: rgba(255, 252, 247, 0.82);
+    border: 1px solid rgba(22, 50, 79, 0.08);
+    box-shadow: 0 22px 50px rgba(38, 48, 62, 0.08);
+  }
+
+  .hero-panel {
+    border-radius: 28px;
+    overflow: hidden;
+    transform: rotate(1.3deg);
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem 1.1rem;
+    background: rgba(22, 50, 79, 0.05);
+    color: #38506b;
+    font-size: 0.88rem;
+  }
+
+  .dot {
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 999px;
+  }
+
+  .coral { background: #d66f45; }
+  .gold { background: #efb45b; }
+  .teal { background: #3fa7a3; }
+
+  .panel-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    padding: 1.3rem;
+  }
+
+  .panel-grid div {
+    padding: 1rem;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.72);
+  }
+
+  .mini-label {
+    display: block;
+    color: #9a4f2d;
+    font-size: 0.73rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+    margin-bottom: 0.4rem;
+  }
+
+  .panel-grid p {
+    color: #29425b;
+    font-size: 0.95rem;
+    margin: 0;
+  }
+
+  .signal-band {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+    margin-bottom: 4rem;
+  }
+
+  .signal-card {
+    border-radius: 22px;
+    padding: 1.35rem;
+  }
+
+  .signal-card span {
+    display: block;
+    margin-bottom: 0.55rem;
+    color: #9a4f2d;
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.13em;
+    font-weight: 700;
+  }
+
+  .signal-card p {
+    margin: 0;
+    color: #2e4760;
+    line-height: 1.65;
+  }
+
+  .feature-section,
+  .workflow-section,
+  .split-panel,
+  .cta-strip {
+    margin-bottom: 4rem;
+  }
+
+  .section-heading {
+    display: grid;
+    gap: 0.9rem;
+    max-width: 760px;
+    margin-bottom: 1.6rem;
+  }
+
+  .section-heading h2,
+  .split-copy h2,
+  .cta-strip h2 {
+    font-size: clamp(2rem, 4vw, 3.4rem);
+    color: #16324f;
+  }
+
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+  }
+
+  .feature {
+    border-radius: 22px;
+    padding: 1.45rem;
+  }
+
+  .feature h3,
+  .comparison-card h3 {
+    margin: 0 0 0.65rem;
+    font-size: 1.18rem;
+    color: #16324f;
+  }
+
+  .feature p,
+  .split-copy p {
+    margin: 0;
+    color: #4f6073;
+    line-height: 1.75;
+  }
+
+  .workflow-track {
+    display: grid;
+    gap: 0.9rem;
+  }
+
+  .step {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.2rem;
+    border-radius: 18px;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.78), rgba(247, 241, 230, 0.95));
+    border: 1px solid rgba(22, 50, 79, 0.08);
+    color: #223c57;
+    box-shadow: 0 14px 30px rgba(38, 48, 62, 0.06);
+  }
+
+  .step span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 3rem;
+    height: 3rem;
+    border-radius: 16px;
+    background: linear-gradient(135deg, #d66f45, #efb45b);
+    color: white;
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 700;
+  }
+
+  .split-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.92fr);
+    gap: 1.25rem;
+    align-items: center;
+  }
+
+  .text-link {
+    display: inline-flex;
+    margin-top: 1rem;
+    font-weight: 700;
+    color: #9a4f2d;
+    text-decoration: none !important;
+  }
+
+  .api-card {
+    border-radius: 26px;
+    padding: 1.25rem;
+  }
+
+  .api-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem;
+    align-items: center;
+    padding: 0.85rem 0;
+    border-bottom: 1px solid rgba(22, 50, 79, 0.08);
+    color: #2b4866;
+  }
+
+  .api-row:last-child {
+    border-bottom: none;
+  }
+
+  .api-row strong {
+    min-width: 6rem;
+    color: #d66f45;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.86rem;
+  }
+
+  .accent {
+    position: relative;
+  }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+  }
+
+  .comparison-card {
+    border-radius: 24px;
+    padding: 1.4rem;
+  }
+
+  .comparison-card ul {
+    margin: 0;
+    padding-left: 1.2rem;
+    color: #41556d;
+    line-height: 1.8;
+  }
+
+  .comparison-card.good {
+    background: linear-gradient(180deg, rgba(255, 251, 243, 0.92), rgba(247, 241, 230, 0.94));
+  }
+
+  .comparison-card.caution {
+    background: linear-gradient(180deg, rgba(255, 248, 242, 0.9), rgba(249, 236, 230, 0.94));
+  }
+
+  .cta-strip {
+    display: flex;
+    justify-content: space-between;
+    gap: 1.2rem;
+    align-items: end;
+    padding: 2rem 0 4rem;
+  }
+
+  @media (max-width: 960px) {
+    .hero,
+    .split-panel,
+    .cta-strip,
+    .feature-grid,
+    .comparison-grid,
+    .signal-band {
+      grid-template-columns: 1fr;
+      display: grid;
+    }
+
+    .cta-strip {
+      align-items: start;
+    }
+
+    .hero-panel {
+      transform: none;
+    }
+  }
+
+  @media (max-width: 700px) {
+    .hero {
+      padding-top: 3rem;
+    }
+
+    .panel-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .hero,
+    .signal-band,
+    .feature-section,
+    .workflow-section,
+    .split-panel,
+    .cta-strip {
+      width: min(100vw - 1.2rem, 1180px);
+    }
+
+    .step {
+      align-items: start;
+    }
   }
 </style>

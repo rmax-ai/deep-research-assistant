@@ -14,18 +14,18 @@
   }
 
   :global(.doc h1) {
-    font-size: 2rem;
-    margin-bottom: 0.5rem;
-    color: #f1f5f9;
+    font-size: clamp(2.4rem, 5vw, 4rem);
+    margin-bottom: 0.8rem;
+    color: var(--text-strong);
     letter-spacing: -0.02em;
   }
 
   :global(.doc h2) {
-    font-size: 1.35rem;
+    font-size: 1.5rem;
     margin-top: 2.5rem;
     margin-bottom: 0.75rem;
-    color: #e2e8f0;
-    border-bottom: 1px solid #1e293b;
+    color: var(--text-strong);
+    border-bottom: 1px solid var(--line);
     padding-bottom: 0.35rem;
   }
 
@@ -33,29 +33,31 @@
     font-size: 1.1rem;
     margin-top: 1.5rem;
     margin-bottom: 0.5rem;
-    color: #cbd5e1;
+    color: #28415c;
   }
 
   :global(.doc p) {
     margin: 0.75rem 0;
-    color: #94a3b8;
+    color: var(--text-body);
   }
 
   :global(.doc strong) {
-    color: #e2e8f0;
+    color: var(--text-strong);
   }
 
   :global(.doc blockquote) {
-    border-left: 3px solid #22d3ee;
+    border-left: 3px solid var(--accent);
     padding-left: 1rem;
     margin: 1rem 0;
-    color: #64748b;
+    color: var(--text-soft);
     font-style: italic;
+    font-family: "Instrument Serif", serif;
+    font-size: 1.2rem;
   }
 
   :global(.doc hr) {
     border: none;
-    border-top: 1px solid #1e293b;
+    border-top: 1px solid var(--line);
     margin: 2rem 0;
   }
 </style>
