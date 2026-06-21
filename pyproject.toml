@@ -94,9 +94,13 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 addopts = ["-v", "--tb=short", "--strict-markers"]
 markers = [
     "live_llm: requires a real Gemini API key",
     "live_agent_smoke: bounded live validation for core model-backed agents",
     "live_bounded_workflow: bounded live validation for the workflow graph with stubbed search",
+]
+filterwarnings = [
+    "ignore:BaseAgentConfig is deprecated and will be removed in future versions\\.:DeprecationWarning",
 ]
