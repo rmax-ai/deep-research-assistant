@@ -107,7 +107,7 @@ def _instrument_node(node_name: str, node_func: Any) -> Any:
             counts=_state_counts(state),
             message=f"{node_name} started",
         )
-        _workflow_log(logging.INFO, "workflow node started", status="started", **start_context)
+        _workflow_log(logging.DEBUG, "workflow node started", status="started", **start_context)
         started_at = time.perf_counter()
 
         try:
@@ -150,7 +150,7 @@ def _instrument_node(node_name: str, node_func: Any) -> Any:
             message=f"{node_name} completed",
         )
         _workflow_log(
-            logging.INFO,
+            logging.DEBUG,
             "workflow node completed",
             status="ok",
             duration_ms=duration_ms,
@@ -162,7 +162,7 @@ def _instrument_node(node_name: str, node_func: Any) -> Any:
         if isinstance(route, int):
             await _publish_route_selection(state, node_name, route)
             _workflow_log(
-                logging.INFO,
+                logging.DEBUG,
                 "workflow route selected",
                 route=route,
                 **completion_context,
