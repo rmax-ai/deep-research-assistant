@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from deep_research.nodes.scope import apply_scope_change
 from deep_research.telemetry.events import get_event_bus
 from deep_research.workflow.graph import build_research_workflow
-from deep_research.workflow.state import get_state, reset_state
+from deep_research.workflow.state import get_state, reset_state, set_state
 
 app = FastAPI(
     title="Deep Research Assistant",
@@ -29,6 +29,7 @@ app = FastAPI(
 )
 
 _active_runs: dict[str, dict[str, Any]] = {}
+_run_tasks: dict[str, asyncio.Task[None]] = {}
 _workflow = build_research_workflow()
 
 
@@ -117,28 +118,27 @@ def _default_approval_inputs(mode: str) -> dict[str, dict[str, str]]:
     }
 
 
-@app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.1.0"}
+def _build_objective_text(request: ObjectiveRequest) -> str:
+    objective_text = request.primary_question
+    if request.decision_to_support:
+        objective_text += f"\n\nDecision to support: {request.decision_to_support}"
+    if request.intended_audience:
+        objective_text += f"\n\nAudience: {', '.join(request.intended_audience)}"
+    return objective_text
 
 
-@app.post("/v1/research-runs", response_model=RunStatusResponse)
-async def create_research_run(request: CreateRunRequest) -> RunStatusResponse:
-    """Create and execute a new research run."""
-    run_id = str(uuid.uuid4())[:8]
-    session_id = f"session_{run_id}"
-    user_id = "api_user"
-
-    reset_state()
-    get_event_bus().reset()
-    state = get_state()
-    state["app:run_id"] = run_id
-    state["app:run_mode"] = request.mode
-    state["app:phase"] = "planning"
-    state["app:approval_inputs"] = deepcopy(
-        request.constraints.get("approval_inputs", _default_approval_inputs(request.mode))
-    )
-    state["app:pending_interventions"] = list(request.constraints.get("interventions", []))
+async def _execute_research_run(
+    *,
+    run_id: str,
+    session_id: str,
+    user_id: str,
+    objective_text: str,
+    state: dict[str, Any],
+) -> None:
+    run_data = _require_run(run_id)
+    run_data["status"] = "running"
+    run_data["started_at"] = _now()
+    set_state(state)
 
     runner = InMemoryRunner(agent=cast(BaseAgent, _workflow), app_name="deep_research_api")
     await runner.session_service.create_session(
@@ -147,42 +147,89 @@ async def create_research_run(request: CreateRunRequest) -> RunStatusResponse:
         session_id=session_id,
     )
 
-    objective_text = request.objective.primary_question
-    if request.objective.decision_to_support:
-        objective_text += f"\n\nDecision to support: {request.objective.decision_to_support}"
-    if request.objective.intended_audience:
-        objective_text += f"\n\nAudience: {', '.join(request.objective.intended_audience)}"
-
     msg = Content(role="user", parts=[Part(text=objective_text)])
-    events = []
-    async for event in runner.run_async(
-        user_id=user_id,
-        session_id=session_id,
-        new_message=msg,
-    ):
-        events.append(event)
 
-    final_state = deepcopy(get_state())
+    try:
+        events = []
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=session_id,
+            new_message=msg,
+        ):
+            events.append(event)
+            run_data["event_count"] = len(events)
+
+        final_state = deepcopy(get_state())
+        run_data["state"] = final_state
+        run_data["status"] = "completed"
+        run_data["phase"] = final_state.get("app:phase", "completed")
+        run_data["report"] = final_state.get("app:final_report", "")
+        run_data["events"] = get_event_bus().get_events_since(run_id, None)
+        run_data["approvals"] = deepcopy(final_state.get("app:approval_decisions", {}))
+        run_data["interventions"] = list(final_state.get("app:pending_interventions", []))
+        run_data["completed_at"] = _now()
+        _sync_run_summary(run_data)
+    except Exception as exc:
+        final_state = deepcopy(get_state())
+        run_data["state"] = final_state
+        run_data["status"] = "failed"
+        run_data["phase"] = final_state.get("app:phase", run_data.get("phase", "failed"))
+        run_data["error"] = str(exc)
+        run_data["events"] = get_event_bus().get_events_since(run_id, None)
+        _sync_run_summary(run_data)
+    finally:
+        reset_state()
+        _run_tasks.pop(run_id, None)
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok", "version": "0.1.0"}
+
+
+@app.post("/v1/research-runs", response_model=RunStatusResponse)
+async def create_research_run(request: CreateRunRequest) -> RunStatusResponse:
+    """Create a new research run and execute it asynchronously."""
+    run_id = str(uuid.uuid4())[:8]
+    session_id = f"session_{run_id}"
+    user_id = "api_user"
+
+    state: dict[str, Any] = {}
+    state["app:run_id"] = run_id
+    state["app:run_mode"] = request.mode
+    state["app:phase"] = "planning"
+    state["app:approval_inputs"] = deepcopy(
+        request.constraints.get("approval_inputs", _default_approval_inputs(request.mode))
+    )
+    state["app:pending_interventions"] = list(request.constraints.get("interventions", []))
     run_data = {
         "run_id": run_id,
         "session_id": session_id,
-        "status": "completed",
-        "phase": final_state.get("app:phase", "completed"),
-        "report": final_state.get("app:final_report", ""),
-        "event_count": len(events),
-        "events": get_event_bus().get_events_since(run_id, None),
-        "state": final_state,
-        "approvals": deepcopy(final_state.get("app:approval_decisions", {})),
-        "interventions": list(final_state.get("app:pending_interventions", [])),
+        "status": "queued",
+        "phase": state.get("app:phase", "planning"),
+        "report": "",
+        "event_count": 0,
+        "events": [],
+        "state": state,
+        "approvals": {},
+        "interventions": list(state.get("app:pending_interventions", [])),
         "created_at": _now(),
     }
     _sync_run_summary(run_data)
     _active_runs[run_id] = run_data
-    reset_state()
+    _run_tasks[run_id] = asyncio.create_task(
+        _execute_research_run(
+            run_id=run_id,
+            session_id=session_id,
+            user_id=user_id,
+            objective_text=_build_objective_text(request.objective),
+            state=state,
+        )
+    )
 
     return RunStatusResponse(
         run_id=run_id,
-        status="completed",
+        status=run_data["status"],
         objective=run_data["objective"],
         scope=run_data["scope"],
         questions_count=run_data["questions_count"],

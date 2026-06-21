@@ -2,10 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from deep_research.api.routes import app
+
+
+async def _wait_for_run_completion(client: AsyncClient, run_id: str, timeout_seconds: float = 5.0) -> dict:
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    while True:
+        response = await client.get(f"/v1/research-runs/{run_id}")
+        assert response.status_code == 200
+        data = response.json()
+        if data["status"] in {"completed", "failed"}:
+            return data
+        if asyncio.get_running_loop().time() >= deadline:
+            raise AssertionError(f"Timed out waiting for run {run_id} to finish")
+        await asyncio.sleep(0.01)
 
 
 @pytest.fixture(autouse=True)
@@ -93,7 +108,9 @@ class TestCreateRun:
         assert response.status_code == 200
         data = response.json()
         assert "run_id" in data
-        assert data["status"] == "completed"
+        assert data["status"] == "queued"
+        completed = await _wait_for_run_completion(client, data["run_id"])
+        assert completed["status"] == "completed"
 
     async def test_create_with_full_objective(self, client):
         response = await client.post(
@@ -113,8 +130,10 @@ class TestCreateRun:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["questions_count"] >= 0
-        assert data["claims_count"] >= 0
+        assert data["status"] == "queued"
+        completed = await _wait_for_run_completion(client, data["run_id"])
+        assert completed["questions_count"] >= 0
+        assert completed["claims_count"] >= 0
 
     async def test_invalid_objective(self, client):
         response = await client.post(
@@ -138,6 +157,7 @@ class TestGetRun:
             timeout=60,
         )
         run_id = create_resp.json()["run_id"]
+        await _wait_for_run_completion(client, run_id)
 
         response = await client.get(f"/v1/research-runs/{run_id}")
         assert response.status_code == 200
@@ -158,6 +178,7 @@ class TestCollaborationEndpoints:
             timeout=60,
         )
         run_id = create_resp.json()["run_id"]
+        await _wait_for_run_completion(client, run_id)
 
         response = await client.get(f"/v1/research-runs/{run_id}/frontier")
         assert response.status_code == 200
@@ -188,6 +209,7 @@ class TestCollaborationEndpoints:
             timeout=60,
         )
         run_id = create_resp.json()["run_id"]
+        await _wait_for_run_completion(client, run_id)
 
         async with client.stream("GET", f"/v1/research-runs/{run_id}/events") as response:
             body = await response.aread()
@@ -204,6 +226,7 @@ class TestCollaborationEndpoints:
             timeout=60,
         )
         run_id = create_resp.json()["run_id"]
+        await _wait_for_run_completion(client, run_id)
 
         response = await client.get(f"/v1/research-runs/{run_id}/concept-map")
         assert response.status_code == 200
@@ -218,6 +241,7 @@ class TestCollaborationEndpoints:
             timeout=60,
         )
         run_id = create_resp.json()["run_id"]
+        await _wait_for_run_completion(client, run_id)
 
         response = await client.post(
             f"/v1/research-runs/{run_id}/interventions",
@@ -236,6 +260,7 @@ class TestCollaborationEndpoints:
             timeout=60,
         )
         run_id = create_resp.json()["run_id"]
+        await _wait_for_run_completion(client, run_id)
 
         response = await client.post(
             f"/v1/research-runs/{run_id}/approvals/C",
@@ -253,6 +278,7 @@ class TestCollaborationEndpoints:
             timeout=60,
         )
         run_id = create_resp.json()["run_id"]
+        await _wait_for_run_completion(client, run_id)
 
         await client.post(
             f"/v1/research-runs/{run_id}/approvals/C",
@@ -280,6 +306,7 @@ class TestExport:
             timeout=60,
         )
         run_id = create_resp.json()["run_id"]
+        await _wait_for_run_completion(client, run_id)
 
         response = await client.post(f"/v1/research-runs/{run_id}/exports?format=markdown")
         assert response.status_code == 200
