@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from deep_research.api import routes
 from deep_research.api.routes import app
 
 
@@ -23,9 +25,20 @@ async def _wait_for_run_completion(client: AsyncClient, run_id: str, timeout_sec
         await asyncio.sleep(0.01)
 
 
+async def _cancel_background_tasks() -> None:
+    tasks = list(routes._run_tasks.values())
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    routes._run_tasks.clear()
+
+
 @pytest.fixture(autouse=True)
-def stub_api_dependencies(monkeypatch: pytest.MonkeyPatch):
+async def stub_api_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    import deep_research.settings as settings_module
     from deep_research.settings import get_settings
+    from deep_research.storage.database import close_database, init_database
 
     async def fake_web_search(query: str, max_results: int = 5, tool_context=None):
         return {
@@ -42,11 +55,26 @@ def stub_api_dependencies(monkeypatch: pytest.MonkeyPatch):
             ],
         }
 
+    db_path = tmp_path / "api-test.db"
+    monkeypatch.setenv("DEEP_RESEARCH_DATABASE_URL", f"sqlite+aiosqlite:///{db_path}")
+    monkeypatch.setattr(settings_module, "_settings", None)
+    await close_database()
+    await init_database()
+
     monkeypatch.setattr("deep_research.tools.search.web_search", fake_web_search)
     settings = get_settings()
     monkeypatch.setattr(settings.workflow, "enable_iterative_research", False)
     monkeypatch.setattr(settings.workflow, "enable_follow_up_questions", False)
     monkeypatch.setattr(settings.workflow, "maximum_parallel_questions", 1)
+    routes._active_runs.clear()
+    await _cancel_background_tasks()
+    routes.get_event_bus().reset()
+    yield
+    await _cancel_background_tasks()
+    routes._active_runs.clear()
+    routes.get_event_bus().reset()
+    await close_database()
+    monkeypatch.setattr(settings_module, "_settings", None)
 
 
 @pytest.fixture
@@ -168,6 +196,62 @@ class TestGetRun:
         response = await client.get("/v1/research-runs/nonexistent")
         assert response.status_code == 404
 
+    async def test_get_persisted_run_after_in_memory_cache_is_cleared(self, client):
+        create_resp = await client.post(
+            "/v1/research-runs",
+            json={"objective": {"title": "Persisted Test", "primary_question": "Does SQLite survive restart?"}},
+            timeout=60,
+        )
+        run_id = create_resp.json()["run_id"]
+        await _wait_for_run_completion(client, run_id)
+
+        routes._active_runs.clear()
+
+        response = await client.get(f"/v1/research-runs/{run_id}")
+        assert response.status_code == 200
+        assert response.json()["status"] == "completed"
+
+    async def test_queued_run_is_persisted_before_background_completion(self, client):
+        response = await client.post(
+            "/v1/research-runs",
+            json={"objective": {"title": "Queued Persistence", "primary_question": "Persist queued row"}},
+            timeout=60,
+        )
+        run_id = response.json()["run_id"]
+
+        routes._active_runs.clear()
+
+        queued = await client.get(f"/v1/research-runs/{run_id}")
+        assert queued.status_code == 200
+        assert queued.json()["status"] in {"queued", "running", "completed"}
+
+    async def test_failed_run_is_persisted_with_error(self, client, monkeypatch: pytest.MonkeyPatch):
+        def broken_run_async(self, *args, **kwargs):
+            del self, args, kwargs
+
+            async def _iter():
+                raise RuntimeError("forced workflow failure")
+                yield None
+
+            return _iter()
+
+        monkeypatch.setattr(routes.InMemoryRunner, "run_async", broken_run_async)
+
+        create_resp = await client.post(
+            "/v1/research-runs",
+            json={"objective": {"title": "Failure Test", "primary_question": "Break the runner"}},
+            timeout=60,
+        )
+        run_id = create_resp.json()["run_id"]
+        failed = await _wait_for_run_completion(client, run_id)
+        assert failed["status"] == "failed"
+
+        routes._active_runs.clear()
+        persisted = await routes.get_run(run_id)
+        assert persisted is not None
+        assert persisted["status"] == "failed"
+        assert persisted["error"] == "forced workflow failure"
+
 
 @pytest.mark.asyncio
 class TestCollaborationEndpoints:
@@ -217,7 +301,38 @@ class TestCollaborationEndpoints:
         assert response.status_code == 200
         text = body.decode()
         assert "event: run.started" in text
+        assert "event: node.started" in text
+        assert "event: report.generated" in text
         assert "event: run.completed" in text
+
+    async def test_running_run_accumulates_live_progress_events(self, client, monkeypatch: pytest.MonkeyPatch):
+        from deep_research.agents.research_director import research_director as original_research_director
+
+        async def slow_research_director(*args, **kwargs):
+            await asyncio.sleep(0.05)
+            return await original_research_director(*args, **kwargs)
+
+        monkeypatch.setattr("deep_research.agents.research_director.research_director", slow_research_director)
+
+        create_resp = await client.post(
+            "/v1/research-runs",
+            json={"objective": {"title": "Live Events", "primary_question": "Show node progress"}},
+            timeout=60,
+        )
+        run_id = create_resp.json()["run_id"]
+
+        deadline = asyncio.get_running_loop().time() + 2.0
+        while True:
+            run_data = routes._active_runs.get(run_id)
+            if run_data and run_data.get("events"):
+                event_types = [event["event_type"] for event in run_data["events"]]
+                assert "node.started" in event_types
+                break
+            if asyncio.get_running_loop().time() >= deadline:
+                raise AssertionError("Timed out waiting for live progress events")
+            await asyncio.sleep(0.01)
+
+        await _wait_for_run_completion(client, run_id)
 
     async def test_concept_map_endpoint_returns_topic_graph(self, client):
         create_resp = await client.post(
@@ -252,6 +367,11 @@ class TestCollaborationEndpoints:
         frontier = await client.get(f"/v1/research-runs/{run_id}/frontier")
         questions = frontier.json()["questions"]
         assert any(question["text"] == "Investigate audit log retention." for question in questions)
+
+        routes._active_runs.clear()
+        frontier_after_restart = await client.get(f"/v1/research-runs/{run_id}/frontier")
+        persisted_questions = frontier_after_restart.json()["questions"]
+        assert any(question["text"] == "Investigate audit log retention." for question in persisted_questions)
 
     async def test_approval_endpoint_records_decision(self, client):
         create_resp = await client.post(
@@ -290,6 +410,10 @@ class TestCollaborationEndpoints:
         data = response.json()
         assert data["run_id"] == run_id
         assert data["approvals"]["C"]["status"] == "approved"
+
+        routes._active_runs.clear()
+        persisted = await client.get(f"/v1/research-runs/{run_id}/approvals")
+        assert persisted.json()["approvals"]["C"]["status"] == "approved"
 
 
 @pytest.mark.asyncio

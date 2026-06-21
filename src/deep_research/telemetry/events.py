@@ -12,6 +12,7 @@ EventCallback = Callable[[dict[str, Any]], Awaitable[None] | None]
 
 EVENT_TYPES = {
     "run.started",
+    "run.failed",
     "scope.proposed",
     "approval.requested",
     "perspective.created",
@@ -26,6 +27,14 @@ EVENT_TYPES = {
     "section.generated",
     "verification.failed",
     "verification.passed",
+    "node.started",
+    "node.completed",
+    "node.failed",
+    "route.selected",
+    "budget.checked",
+    "policy.applied",
+    "stop.evaluated",
+    "report.generated",
     "run.completed",
 }
 

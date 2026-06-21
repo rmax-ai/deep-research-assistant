@@ -111,6 +111,47 @@ class TestWorkflowGraph:
         events = bus.get_events_since("run-1", None)
         assert any(event["event_type"] == "run.completed" for event in events)
 
+    async def test_instrumented_nodes_emit_lifecycle_and_route_events(self):
+        from deep_research.telemetry.events import get_event_bus
+        from deep_research.workflow.graph import _instrument_node, scheduler_select
+        from deep_research.workflow.state import get_state, reset_state
+
+        reset_state()
+        bus = get_event_bus()
+        bus.reset()
+        state = get_state()
+        state.update(
+            {
+                "app:run_id": "run-node",
+                "app:questions": [{"question_id": "q-1", "text": "A", "priority": 0.9, "status": "pending"}],
+                "app:phase": "planning",
+            }
+        )
+        instrumented = _instrument_node("scheduler_select", scheduler_select)
+        await instrumented(SimpleNamespace(route=None), None)
+        events = bus.get_events_since("run-node", None)
+        event_types = [event["event_type"] for event in events]
+
+        assert "node.started" in event_types
+        assert "node.completed" in event_types
+
+    async def test_stop_evaluate_emits_stop_event(self):
+        from deep_research.telemetry.events import get_event_bus
+        from deep_research.workflow.graph import stop_evaluate
+        from deep_research.workflow.state import get_state, reset_state
+
+        reset_state()
+        bus = get_event_bus()
+        bus.reset()
+        state = get_state()
+        state.update({"app:run_id": "run-stop", "app:phase": "researching"})
+
+        await stop_evaluate(SimpleNamespace(route=None), None)
+        events = bus.get_events_since("run-stop", None)
+        stop_events = [event for event in events if event["event_type"] == "stop.evaluated"]
+        assert stop_events
+        assert "should_stop" in stop_events[-1]["payload"]
+
     async def test_scope_change_mid_run_routes_back_to_question_graph(self):
         from deep_research.workflow.graph import scope_change_apply
         from deep_research.workflow.state import get_state, reset_state

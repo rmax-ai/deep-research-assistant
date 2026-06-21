@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -18,14 +20,30 @@ from google.genai.types import Content, Part
 from pydantic import BaseModel, Field
 
 from deep_research.nodes.scope import apply_scope_change
+from deep_research.storage.database import close_database, init_database
+from deep_research.storage.repositories import create_run, get_run, update_run
+from deep_research.telemetry import configure_logging
 from deep_research.telemetry.events import get_event_bus
 from deep_research.workflow.graph import build_research_workflow
 from deep_research.workflow.state import get_state, reset_state, set_state
+
+configure_logging()
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Initialize and dispose app-scoped resources."""
+    await init_database()
+    yield
+    await close_database()
+
 
 app = FastAPI(
     title="Deep Research Assistant",
     version="0.1.0",
     description="Enterprise-grade governed research runtime API",
+    lifespan=lifespan,
 )
 
 _active_runs: dict[str, dict[str, Any]] = {}
@@ -91,9 +109,16 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _require_run(run_id: str) -> dict[str, Any]:
+async def _load_run(run_id: str) -> dict[str, Any] | None:
     run_data = _active_runs.get(run_id)
-    if not run_data:
+    if run_data is not None:
+        return run_data
+    return await get_run(run_id)
+
+
+async def _require_run(run_id: str) -> dict[str, Any]:
+    run_data = await _load_run(run_id)
+    if run_data is None:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
     return run_data
 
@@ -107,6 +132,13 @@ def _sync_run_summary(run_data: dict[str, Any]) -> None:
     run_data["sources_count"] = len(state.get("app:sources", []))
     run_data["report"] = state.get("app:final_report", run_data.get("report", ""))
     run_data["phase"] = state.get("app:phase", run_data.get("phase", "completed"))
+
+
+async def _persist_run(run_data: dict[str, Any], *, create: bool = False) -> dict[str, Any]:
+    _sync_run_summary(run_data)
+    persisted = await (create_run(run_data) if create else update_run(str(run_data["run_id"]), run_data))
+    run_data.update(persisted)
+    return run_data
 
 
 def _default_approval_inputs(mode: str) -> dict[str, dict[str, str]]:
@@ -135,10 +167,20 @@ async def _execute_research_run(
     objective_text: str,
     state: dict[str, Any],
 ) -> None:
-    run_data = _require_run(run_id)
+    run_data = await _require_run(run_id)
     run_data["status"] = "running"
     run_data["started_at"] = _now()
+    await _persist_run(run_data)
     set_state(state)
+    bus = get_event_bus()
+    live_events = run_data.setdefault("events", [])
+
+    async def _append_live_event(event: dict[str, Any]) -> None:
+        if event.get("run_id") == run_id:
+            live_events.append(event)
+
+    unsubscribe = bus.subscribe("*", _append_live_event)
+    logger.info("research run started", extra={"run_id": run_id, "status": "running"})
 
     runner = InMemoryRunner(agent=cast(BaseAgent, _workflow), app_name="deep_research_api")
     await runner.session_service.create_session(
@@ -160,26 +202,51 @@ async def _execute_research_run(
             run_data["event_count"] = len(events)
 
         final_state = deepcopy(get_state())
-        run_data["state"] = final_state
-        run_data["status"] = "completed"
-        run_data["phase"] = final_state.get("app:phase", "completed")
-        run_data["report"] = final_state.get("app:final_report", "")
-        run_data["events"] = get_event_bus().get_events_since(run_id, None)
-        run_data["approvals"] = deepcopy(final_state.get("app:approval_decisions", {}))
-        run_data["interventions"] = list(final_state.get("app:pending_interventions", []))
-        run_data["completed_at"] = _now()
-        _sync_run_summary(run_data)
+        terminal_run_data = dict(run_data)
+        terminal_run_data["state"] = final_state
+        terminal_run_data["status"] = "completed"
+        terminal_run_data["phase"] = final_state.get("app:phase", "completed")
+        terminal_run_data["report"] = final_state.get("app:final_report", "")
+        terminal_run_data["approvals"] = deepcopy(final_state.get("app:approval_decisions", {}))
+        terminal_run_data["interventions"] = list(final_state.get("app:pending_interventions", []))
+        terminal_run_data["completed_at"] = _now()
+        logger.info(
+            "research run completed",
+            extra={
+                "run_id": run_id,
+                "status": "completed",
+                "phase": terminal_run_data["phase"],
+                "event_count": len(live_events),
+            },
+        )
+        await _persist_run(terminal_run_data)
+        run_data.clear()
+        run_data.update(terminal_run_data)
     except Exception as exc:
         final_state = deepcopy(get_state())
-        run_data["state"] = final_state
-        run_data["status"] = "failed"
-        run_data["phase"] = final_state.get("app:phase", run_data.get("phase", "failed"))
-        run_data["error"] = str(exc)
-        run_data["events"] = get_event_bus().get_events_since(run_id, None)
-        _sync_run_summary(run_data)
+        terminal_run_data = dict(run_data)
+        terminal_run_data["state"] = final_state
+        terminal_run_data["status"] = "failed"
+        terminal_run_data["phase"] = final_state.get("app:phase", run_data.get("phase", "failed"))
+        terminal_run_data["error"] = str(exc)
+        terminal_run_data["completed_at"] = _now()
+        logger.exception(
+            "research run failed",
+            extra={
+                "run_id": run_id,
+                "status": "failed",
+                "phase": terminal_run_data["phase"],
+                "error_type": type(exc).__name__,
+            },
+        )
+        await _persist_run(terminal_run_data)
+        run_data.clear()
+        run_data.update(terminal_run_data)
     finally:
+        unsubscribe()
         reset_state()
         _run_tasks.pop(run_id, None)
+        _active_runs.pop(run_id, None)
 
 
 @app.get("/health")
@@ -215,7 +282,7 @@ async def create_research_run(request: CreateRunRequest) -> RunStatusResponse:
         "interventions": list(state.get("app:pending_interventions", [])),
         "created_at": _now(),
     }
-    _sync_run_summary(run_data)
+    await _persist_run(run_data, create=True)
     _active_runs[run_id] = run_data
     _run_tasks[run_id] = asyncio.create_task(
         _execute_research_run(
@@ -242,7 +309,7 @@ async def create_research_run(request: CreateRunRequest) -> RunStatusResponse:
 @app.get("/v1/research-runs/{run_id}", response_model=RunStatusResponse)
 async def get_research_run(run_id: str) -> RunStatusResponse:
     """Get the current state of a research run."""
-    run_data = _require_run(run_id)
+    run_data = await _require_run(run_id)
     _sync_run_summary(run_data)
     return RunStatusResponse(
         run_id=run_data["run_id"],
@@ -259,7 +326,7 @@ async def get_research_run(run_id: str) -> RunStatusResponse:
 @app.get("/v1/research-runs/{run_id}/graph")
 async def get_research_graph(run_id: str) -> dict[str, Any]:
     """Get the research graph for a run."""
-    run_data = _require_run(run_id)
+    run_data = await _require_run(run_id)
     state = run_data.get("state", {})
     return {
         "run_id": run_id,
@@ -273,7 +340,7 @@ async def get_research_graph(run_id: str) -> dict[str, Any]:
 @app.get("/v1/research-runs/{run_id}/frontier", response_model=FrontierResponse)
 async def get_research_frontier(run_id: str) -> FrontierResponse:
     """Return the live research frontier."""
-    run_data = _require_run(run_id)
+    run_data = await _require_run(run_id)
     state = run_data.get("state", {})
     return FrontierResponse(
         run_id=run_id,
@@ -286,7 +353,7 @@ async def get_research_frontier(run_id: str) -> FrontierResponse:
 @app.get("/v1/research-runs/{run_id}/progress", response_model=ProgressResponse)
 async def get_research_progress(run_id: str) -> ProgressResponse:
     """Return phase and budget progress."""
-    run_data = _require_run(run_id)
+    run_data = await _require_run(run_id)
     state = run_data.get("state", {})
     budget = {
         "perspectives": state.get("app:perspective_budgets", {}),
@@ -308,19 +375,25 @@ async def get_research_progress(run_id: str) -> ProgressResponse:
 @app.get("/v1/research-runs/{run_id}/events")
 async def get_research_events(run_id: str, since: str | None = None) -> StreamingResponse:
     """Stream or replay run events as server-sent events."""
-    _require_run(run_id)
+    run_data = await _require_run(run_id)
     bus = get_event_bus()
     queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
     backlog = bus.get_events_since(run_id, since)
+    terminal_events = {"run.completed", "run.failed"}
 
     async def _enqueue(event: dict[str, Any]) -> None:
         if event.get("run_id") == run_id:
             await queue.put(event)
+            if event.get("event_type") in terminal_events:
+                await queue.put(None)
 
     unsubscribe = bus.subscribe("*", _enqueue)
     for event in backlog:
         await queue.put(event)
-    await queue.put(None)
+    if run_data.get("status") in {"completed", "failed"} and (
+        not backlog or backlog[-1].get("event_type") not in terminal_events
+    ):
+        await queue.put(None)
 
     async def event_stream() -> AsyncIterator[str]:
         try:
@@ -338,7 +411,7 @@ async def get_research_events(run_id: str, since: str | None = None) -> Streamin
 @app.get("/v1/research-runs/{run_id}/concept-map")
 async def get_concept_map(run_id: str) -> dict[str, Any]:
     """Return the projected topic graph."""
-    run_data = _require_run(run_id)
+    run_data = await _require_run(run_id)
     concept_map = run_data.get("state", {}).get("app:concept_map")
     if isinstance(concept_map, dict):
         return concept_map
@@ -348,7 +421,7 @@ async def get_concept_map(run_id: str) -> dict[str, Any]:
 @app.post("/v1/research-runs/{run_id}/interventions")
 async def intervene(run_id: str, intervention: InterventionRequest) -> dict[str, Any]:
     """Submit a user intervention on a run."""
-    run_data = _require_run(run_id)
+    run_data = await _require_run(run_id)
     state = run_data.setdefault("state", {})
     record = {
         "type": intervention.type,
@@ -385,7 +458,7 @@ async def intervene(run_id: str, intervention: InterventionRequest) -> dict[str,
             }
         )
 
-    _sync_run_summary(run_data)
+    await _persist_run(run_data)
     return {
         "status": "recorded",
         "run_id": run_id,
@@ -397,7 +470,7 @@ async def intervene(run_id: str, intervention: InterventionRequest) -> dict[str,
 @app.post("/v1/research-runs/{run_id}/approvals/{approval_id}")
 async def submit_approval(run_id: str, approval_id: str, request: ApprovalActionRequest) -> dict[str, Any]:
     """Approve or reject a collaboration gate."""
-    run_data = _require_run(run_id)
+    run_data = await _require_run(run_id)
     state = run_data.setdefault("state", {})
     decisions = state.setdefault("app:approval_decisions", {})
     decision = decisions.setdefault(approval_id, {"gate": approval_id, "required": True, "display_data": {}})
@@ -407,6 +480,7 @@ async def submit_approval(run_id: str, approval_id: str, request: ApprovalAction
     decision["decided_at"] = _now()
     state.setdefault("app:approval_inputs", {})[approval_id] = {"status": request.decision}
     run_data.setdefault("approvals", {})[approval_id] = decision
+    await _persist_run(run_data)
 
     return {
         "run_id": run_id,
@@ -419,7 +493,7 @@ async def submit_approval(run_id: str, approval_id: str, request: ApprovalAction
 @app.get("/v1/research-runs/{run_id}/approvals")
 async def get_approvals(run_id: str) -> dict[str, Any]:
     """Return the current approval gate state for a run."""
-    run_data = _require_run(run_id)
+    run_data = await _require_run(run_id)
     state = run_data.get("state", {})
     approvals = state.get("app:approval_decisions", run_data.get("approvals", {}))
     return {
@@ -431,7 +505,7 @@ async def get_approvals(run_id: str) -> dict[str, Any]:
 @app.post("/v1/research-runs/{run_id}/exports")
 async def export_report(run_id: str, format: str = "markdown") -> dict[str, Any]:
     """Export the final report in the requested format."""
-    run_data = _require_run(run_id)
+    run_data = await _require_run(run_id)
     report = run_data.get("report", "")
     if not report:
         return {

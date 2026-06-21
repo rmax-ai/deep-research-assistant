@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, cast
 
 from google.adk.agents.context import Context
@@ -27,6 +28,148 @@ from deep_research.workflow.state import get_state
 from deep_research.workflow.stopping import evaluate_stopping
 
 logger = logging.getLogger(__name__)
+
+
+def _workflow_log(level: int, message: str, **fields: Any) -> None:
+    logger.log(level, message, extra=fields)
+
+
+def _question_context(question: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "question_id": str(question.get("question_id", "")) or None,
+        "perspective": str(question.get("perspective", "")) or None,
+    }
+
+
+def _node_context(state: dict[str, Any], node: str) -> dict[str, Any]:
+    active_question = state.get("app:active_question", {})
+    return {
+        "run_id": _run_id(state) or None,
+        "phase": str(state.get("app:phase", "")) or None,
+        "node": node,
+        **_question_context(active_question if isinstance(active_question, dict) else {}),
+    }
+
+
+def _result_summary(result: Any) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        return {"result_type": type(result).__name__}
+
+    summary: dict[str, Any] = {}
+    for key, value in result.items():
+        if isinstance(value, (bool, int, float)) or value is None:
+            summary[key] = value
+            continue
+        if isinstance(value, str):
+            summary[key] = value if len(value) <= 160 else f"{value[:157]}..."
+            continue
+        if isinstance(value, list):
+            summary[f"{key}_count"] = len(value)
+            continue
+        if isinstance(value, dict):
+            if "status" in value and isinstance(value["status"], str):
+                summary[f"{key}_status"] = value["status"]
+            else:
+                summary[f"{key}_count"] = len(value)
+    return summary
+
+
+def _state_counts(state: dict[str, Any]) -> dict[str, int]:
+    return {
+        "questions": len(state.get("app:questions", [])),
+        "claims": len(state.get("app:claims", [])),
+        "evidence": len(state.get("app:evidence", [])),
+        "sources": len(state.get("app:sources", [])),
+        "contradictions": len(state.get("app:contradictions", [])),
+        "drafts": len(state.get("app:drafts", [])),
+        "cycles": len(state.get("app:cycle_history", [])),
+    }
+
+
+async def _publish_route_selection(state: dict[str, Any], node: str, route: int) -> None:
+    await _publish(
+        "route.selected",
+        run_id=_run_id(state),
+        node=node,
+        route=route,
+        phase=state.get("app:phase", ""),
+        message=f"{node} selected route {route}",
+    )
+
+
+def _instrument_node(node_name: str, node_func: Any) -> Any:
+    async def _wrapped(ctx: Context, node_input: Any) -> dict[str, Any]:
+        state = get_state()
+        start_context = _node_context(state, node_name)
+        await _publish(
+            "node.started",
+            **start_context,
+            counts=_state_counts(state),
+            message=f"{node_name} started",
+        )
+        _workflow_log(logging.INFO, "workflow node started", status="started", **start_context)
+        started_at = time.perf_counter()
+
+        try:
+            result = await node_func(ctx, node_input)
+        except Exception as exc:
+            state = get_state()
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+            failure_context = _node_context(state, node_name)
+            await _publish(
+                "node.failed",
+                **failure_context,
+                duration_ms=duration_ms,
+                error_type=type(exc).__name__,
+                counts=_state_counts(state),
+                message=f"{node_name} failed",
+            )
+            _workflow_log(
+                logging.ERROR,
+                "workflow node failed",
+                status="failed",
+                duration_ms=duration_ms,
+                error_type=type(exc).__name__,
+                counts=_state_counts(state),
+                **failure_context,
+            )
+            raise
+
+        state = get_state()
+        duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        route = getattr(ctx, "route", None)
+        completion_context = _node_context(state, node_name)
+        await _publish(
+            "node.completed",
+            **completion_context,
+            status="ok",
+            duration_ms=duration_ms,
+            route=route,
+            result=_result_summary(result),
+            counts=_state_counts(state),
+            message=f"{node_name} completed",
+        )
+        _workflow_log(
+            logging.INFO,
+            "workflow node completed",
+            status="ok",
+            duration_ms=duration_ms,
+            route=route,
+            result=_result_summary(result),
+            counts=_state_counts(state),
+            **completion_context,
+        )
+        if isinstance(route, int):
+            await _publish_route_selection(state, node_name, route)
+            _workflow_log(
+                logging.INFO,
+                "workflow route selected",
+                route=route,
+                **completion_context,
+            )
+        return cast(dict[str, Any], result)
+
+    return _wrapped
 
 
 def _extract_user_text(node_input: Any) -> str:
@@ -103,6 +246,8 @@ async def _resolve_approval(ctx: Context, gate: ApprovalGate, state: dict[str, A
             required=True,
             status=gate.status,
             display_data=gate.display_data,
+            approval_gate=gate.gate,
+            message=f"Approval gate {gate.gate} is {gate.status}",
         )
 
     decisions = state.setdefault("app:approval_decisions", {})
@@ -145,6 +290,7 @@ async def scope_classify(ctx: Context, node_input: Any) -> dict[str, Any]:
         run_id=run_id,
         objective=state["app:objective"],
         scope=state["app:scope"],
+        message="Scope proposed",
     )
     return {
         "status": "ok",
@@ -170,6 +316,8 @@ async def perspective_generate(ctx: Context, node_input: Any) -> dict[str, Any]:
         "perspective.created",
         run_id=_run_id(state),
         perspectives=perspectives,
+        perspective_count=len(perspectives),
+        message=f"Generated {len(perspectives)} perspectives",
     )
     return {"perspective_count": len(perspectives), "message": f"Generated {len(perspectives)} perspectives"}
 
@@ -197,6 +345,8 @@ async def question_graph_build(ctx: Context, node_input: Any) -> dict[str, Any]:
         run_id=_run_id(state),
         questions=state["app:questions"],
         version=state["app:questions_version"],
+        question_count=len(state["app:questions"]),
+        message=f"Question graph version {state['app:questions_version']}",
     )
     return {
         "question_count": len(state["app:questions"]),
@@ -236,6 +386,7 @@ async def scheduler_select(ctx: Context, node_input: Any) -> dict[str, Any]:
     state = get_state()
     selection = select_frontier_questions(state.get("app:questions", []))
     selected_questions = selection.get("selected_questions", [])
+    state["app:scheduler_result"] = selection
     state["app:selected_questions"] = selected_questions
     state["app:question_priorities"] = selection.get("priorities", {})
 
@@ -279,6 +430,16 @@ async def search_plan_create(ctx: Context, node_input: Any) -> dict[str, Any]:
         estimated_sources=len(queries),
     )
     state["app:last_budget_check"] = budget_result
+    await _publish(
+        "budget.checked",
+        run_id=_run_id(state),
+        node="search_plan_create",
+        perspective=perspective_name,
+        accepted=bool(budget_result.get("accepted")),
+        query_count=len(queries),
+        reason=budget_result.get("reason", ""),
+        message=f"Budget {'accepted' if budget_result.get('accepted') else 'rejected'} for {perspective_name}",
+    )
 
     if not budget_result.get("accepted"):
         question["status"] = "budget_exhausted"
@@ -309,6 +470,7 @@ async def source_retrieve(ctx: Context, node_input: Any) -> dict[str, Any]:
             run_id=_run_id(state),
             query=query,
             results_count=len(result.get("results", [])),
+            message=f"Executed query {query.get('raw_query', '')[:80]}",
         )
 
     state.setdefault("app:sources", []).extend(batch_results)
@@ -371,6 +533,17 @@ async def source_policy_apply(ctx: Context, node_input: Any) -> dict[str, Any]:
         sources=accepted,
         accepted=len(accepted),
         rejected=len(rejected),
+        deduplicated=deduped_count,
+        message=f"Accepted {len(accepted)} sources",
+    )
+    await _publish(
+        "policy.applied",
+        run_id=_run_id(state),
+        node="source_policy_apply",
+        accepted=len(accepted),
+        rejected=len(rejected),
+        deduplicated=deduped_count,
+        message="Applied source policy filters",
     )
 
     return {
@@ -423,6 +596,9 @@ async def evidence_extract(ctx: Context, node_input: Any) -> dict[str, Any]:
         run_id=_run_id(state),
         evidence=fragments,
         follow_ups_added=len(follow_ups),
+        fragments_count=len(fragments),
+        question_id=question.get("question_id"),
+        message=f"Extracted {len(fragments)} evidence fragments",
     )
     return {
         "fragments": len(fragments),
@@ -450,7 +626,14 @@ async def claims_construct(ctx: Context, node_input: Any) -> dict[str, Any]:
     state.setdefault("app:claims", []).extend(claims)
     question["status"] = "resolved" if claims else "pending"
 
-    await _publish("claim.created", run_id=_run_id(state), claims=claims)
+    await _publish(
+        "claim.created",
+        run_id=_run_id(state),
+        claims=claims,
+        claim_count=len(claims),
+        question_id=question.get("question_id"),
+        message=f"Built {len(claims)} claims",
+    )
     return {"claims_created": len(claims), "message": f"Built {len(claims)} claims"}
 
 
@@ -501,8 +684,13 @@ async def contradictions_search(ctx: Context, node_input: Any) -> dict[str, Any]
     state["app:counter_evidence"] = counter_result
 
     if new_contradictions:
-        await _publish("contradiction.detected", run_id=_run_id(state),
-                       contradictions=new_contradictions)
+        await _publish(
+            "contradiction.detected",
+            run_id=_run_id(state),
+            contradictions=new_contradictions,
+            contradiction_count=len(new_contradictions),
+            message=f"Detected {len(new_contradictions)} contradictions",
+        )
 
     return {
         "contradictions_found": len(new_contradictions),
@@ -525,7 +713,15 @@ async def coverage_calculate(ctx: Context, node_input: Any) -> dict[str, Any]:
     )
     state["app:coverage"] = coverage
     state.setdefault("app:cycle_history", []).append(coverage["cycle_summary"])
-    await _publish("coverage.updated", run_id=_run_id(state), coverage=coverage)
+    await _publish(
+        "coverage.updated",
+        run_id=_run_id(state),
+        coverage=coverage,
+        marginal_information_gain=coverage.get("marginal_information_gain", 0.0),
+        primary_source_coverage=coverage.get("primary_source_coverage", 0.0),
+        evidence_diversity_score=coverage.get("evidence_diversity_score", 0.0),
+        message="Coverage metrics updated",
+    )
     return coverage
 
 
@@ -639,6 +835,15 @@ async def stop_evaluate(ctx: Context, node_input: Any) -> dict[str, Any]:
         }
         ctx.route = 1
         state["app:stopping_decision"] = decision
+        state["app:stop_result"] = decision
+        await _publish(
+            "stop.evaluated",
+            run_id=_run_id(state),
+            should_stop=True,
+            stop_reasons=decision["reasons"],
+            unresolved_material_questions=0,
+            message="Stop evaluation completed",
+        )
         return decision
 
     decision = evaluate_stopping(
@@ -652,6 +857,17 @@ async def stop_evaluate(ctx: Context, node_input: Any) -> dict[str, Any]:
     ).model_dump()
     ctx.route = 1 if bool(decision.get("should_stop")) else 0
     state["app:stopping_decision"] = decision
+    state["app:stop_result"] = decision
+    await _publish(
+        "stop.evaluated",
+        run_id=_run_id(state),
+        should_stop=bool(decision.get("should_stop")),
+        stop_reasons=decision.get("reasons", []),
+        unresolved_material_questions=len(decision.get("unresolved_material_questions", [])),
+        marginal_information_gain=decision.get("marginal_information_gain", 0.0),
+        primary_source_coverage=decision.get("primary_source_coverage", 0.0),
+        message="Stop evaluation completed",
+    )
     return decision
 
 
@@ -668,6 +884,14 @@ async def outline_build(ctx: Context, node_input: Any) -> dict[str, Any]:
     )
     state["app:outline"] = outline
     await _publish("outline.proposed", run_id=_run_id(state), outline=outline)
+    _workflow_log(
+        logging.INFO,
+        "workflow outline proposed",
+        run_id=_run_id(state),
+        phase=state.get("app:phase", ""),
+        node="outline_build",
+        section_count=len(outline.get("sections", [])),
+    )
     return {"section_count": len(outline.get("sections", [])), "message": "Outline built"}
 
 
@@ -700,6 +924,8 @@ async def draft_generate(ctx: Context, node_input: Any) -> dict[str, Any]:
             run_id=_run_id(state),
             section=section,
             draft=draft,
+            section_title=section.get("title", ""),
+            message=f"Drafted section {section.get('title', '')[:80]}",
         )
 
     state["app:drafts"] = drafts
@@ -743,12 +969,16 @@ async def verify_draft(ctx: Context, node_input: Any) -> dict[str, Any]:
         "major_findings": citation_result.get("major_findings", 0) + semantic_result.get("major_findings", 0),
         "passed": blocking == 0,
     }
+    state["app:verify_result"] = result
     state["app:verification"] = result
     ctx.route = 1 if result["passed"] else 0
     await _publish(
         "verification.passed" if result["passed"] else "verification.failed",
         run_id=_run_id(state),
         verification=result,
+        blocking_findings=blocking,
+        passed=result["passed"],
+        message="Draft verification completed",
     )
     return result
 
@@ -770,6 +1000,15 @@ async def repair_draft(ctx: Context, node_input: Any) -> dict[str, Any]:
     state["app:repair_count"] = repair_count + 1
     state["app:repair_result"] = repair_result
     state["app:phase"] = "repairing"
+    _workflow_log(
+        logging.INFO,
+        "workflow repair attempted",
+        run_id=_run_id(state),
+        phase=state.get("app:phase", ""),
+        node="repair_draft",
+        repair_count=state["app:repair_count"],
+        result=_result_summary(repair_result),
+    )
     return repair_result
 
 
@@ -817,6 +1056,14 @@ async def render_output(ctx: Context, node_input: Any) -> dict[str, Any]:
     report = "\n".join(lines)
     state["app:final_report"] = report
     state["app:phase"] = "completed"
+    await _publish(
+        "report.generated",
+        run_id=_run_id(state),
+        report_length=len(report),
+        section_count=len(drafts),
+        claim_count=len(state.get("app:claims", [])),
+        message="Final report generated",
+    )
     await _publish("run.completed", run_id=_run_id(state), report_length=len(report))
     return {"output_format": "markdown", "report_length": len(report), "message": "Pipeline complete"}
 
@@ -902,7 +1149,7 @@ def _build_edges(nodes: dict[str, FunctionNode]) -> list[Edge]:
 
 def build_research_workflow() -> Workflow:
     """Build the complete research workflow."""
-    node_list = [FunctionNode(func=func, name=name) for name, func in _ALL_NODE_FUNCS]
+    node_list = [FunctionNode(func=_instrument_node(name, func), name=name) for name, func in _ALL_NODE_FUNCS]
     nodes = {node.name: node for node in node_list}
     return Workflow(
         name="deep_research_assistant",
