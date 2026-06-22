@@ -205,9 +205,8 @@ def _looks_like_truncated_structured_output(text: str) -> bool:
         elif char == "}":
             if not stack or stack.pop() != "{":
                 return False
-        elif char == "]":
-            if not stack or stack.pop() != "[":
-                return False
+        elif char == "]" and (not stack or stack.pop() != "["):
+            return False
 
     return in_string or bool(stack)
 

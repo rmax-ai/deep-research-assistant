@@ -15,12 +15,18 @@ from __future__ import annotations
 from contextvars import ContextVar
 from typing import Any
 
-_pipeline_state: ContextVar[dict[str, Any]] = ContextVar("pipeline_state", default={})
+_pipeline_state: ContextVar[dict[str, Any] | None] = ContextVar(
+    "pipeline_state", default=None
+)
 
 
 def get_state() -> dict[str, Any]:
     """Return the current pipeline state dict."""
-    return _pipeline_state.get()
+    state = _pipeline_state.get()
+    if state is None:
+        state = {}
+        _pipeline_state.set(state)
+    return state
 
 
 def set_state(state: dict[str, Any]) -> None:
