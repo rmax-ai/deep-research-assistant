@@ -517,7 +517,7 @@ Proceed with the scope proposal if the exclusions and external write controls re
 
 <style>
   .demo-shell {
-    width: min(var(--shell-width), calc(100vw - 2rem));
+    width: min(var(--shell-width), calc(100% - (var(--shell-gutter, 1rem) * 2)));
     margin: 0 auto;
     padding: 2rem 0 4rem;
     display: grid;

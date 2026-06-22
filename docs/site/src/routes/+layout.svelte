@@ -118,6 +118,7 @@
     --surface-strong: rgba(255, 255, 255, 0.84);
     --shell-width: 1040px;
     --doc-width: 760px;
+    --shell-gutter: 1rem;
     --text-strong: #16324f;
     --text-body: #4f6073;
     --text-soft: #7a695e;
@@ -252,7 +253,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    width: min(var(--shell-width), calc(100vw - 2rem));
+    width: min(var(--shell-width), calc(100% - (var(--shell-gutter) * 2)));
     margin: 0 auto;
     padding: 1rem 0;
     border-bottom: 1px solid var(--line);

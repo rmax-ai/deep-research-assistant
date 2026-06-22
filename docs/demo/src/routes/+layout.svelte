@@ -51,6 +51,7 @@
     --teal: #2d807f;
     --shadow: 0 22px 52px rgba(33, 46, 60, 0.08);
     --shell-width: 1040px;
+    --shell-gutter: 1rem;
   }
 
   :global(body) {
@@ -123,7 +124,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    width: min(var(--shell-width), calc(100vw - 2rem));
+    width: min(var(--shell-width), calc(100% - (var(--shell-gutter) * 2)));
     margin: 0 auto;
     padding: 1rem 0;
     border-bottom: 1px solid var(--line);

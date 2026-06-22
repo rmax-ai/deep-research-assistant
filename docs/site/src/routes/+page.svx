@@ -241,7 +241,7 @@ description: Governed multi-agent research workflow for evidence-backed analysis
   .workflow-section,
   .split-panel,
   .cta-strip {
-    width: min(var(--shell-width, 1040px), calc(100vw - 2rem));
+    width: min(var(--shell-width, 1040px), calc(100% - (var(--shell-gutter, 1rem) * 2)));
     margin: 0 auto;
   }
 
