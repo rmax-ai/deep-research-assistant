@@ -92,6 +92,19 @@ async def client():
 
 @pytest.mark.asyncio
 class TestAPIHealth:
+    async def test_startup_fails_without_required_api_keys(self, monkeypatch: pytest.MonkeyPatch):
+        import deep_research.settings as settings_module
+
+        monkeypatch.delenv("DEEP_RESEARCH_EXA_API_KEY", raising=False)
+        monkeypatch.setattr(settings_module, "_settings", None)
+
+        with pytest.raises(RuntimeError, match="DEEP_RESEARCH_EXA_API_KEY"):
+            async with routes.lifespan(app):
+                pass
+
+        monkeypatch.setenv("DEEP_RESEARCH_EXA_API_KEY", "test-exa-key")
+        monkeypatch.setattr(settings_module, "_settings", None)
+
     async def test_route_inventory_matches_supported_surface(self, client):
         del client
         expected = {
@@ -173,6 +186,11 @@ class TestCreateRun:
         assert data["status"] == "queued"
         completed = await _wait_for_run_completion(client, data["run_id"])
         assert completed["status"] == "completed"
+        assert completed["report_preview"]
+
+        progress = await client.get(f"/v1/research-runs/{data['run_id']}/progress")
+        assert progress.status_code == 200
+        assert progress.json()["phase"] == "completed"
 
     async def test_create_with_full_objective(self, client):
         response = await client.post(
@@ -582,3 +600,5 @@ class TestExport:
         data = response.json()
         assert "content" in data
         assert data["format"] == "markdown"
+        assert data["content_length"] > 0
+        assert "Report generation in progress" not in data["content"]

@@ -45,9 +45,26 @@ configure_logging()
 logger = logging.getLogger(__name__)
 
 
+def _validate_startup_configuration() -> None:
+    """Fail API startup when required external integrations are not configured."""
+    settings = get_settings()
+    missing: list[str] = []
+
+    if not settings.exa_api_key:
+        missing.append("DEEP_RESEARCH_EXA_API_KEY")
+
+    if missing:
+        missing_list = ", ".join(missing)
+        raise RuntimeError(
+            "API server startup aborted: missing required configuration for external providers: "
+            f"{missing_list}"
+        )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Initialize and dispose app-scoped resources."""
+    _validate_startup_configuration()
     await init_database()
     await _resume_incomplete_runs()
     yield
@@ -375,7 +392,23 @@ async def _execute_research_run(
             events.append(event)
             run_data["event_count"] = len(events)
 
-        final_state = deepcopy(get_state())
+        persisted_runtime = await get_run(run_id)
+        if persisted_runtime is not None and persisted_runtime.get("state"):
+            final_state = deepcopy(persisted_runtime["state"])
+        else:
+            final_state = deepcopy(get_state())
+
+        latest_checkpoint = await load_latest_checkpoint_for_run(run_id)
+        checkpoint_state = latest_checkpoint["state"] if latest_checkpoint is not None else None
+        if (
+            isinstance(checkpoint_state, dict)
+            and checkpoint_state
+            and (
+                final_state.get("app:phase") != "completed"
+                or not final_state.get("app:final_report")
+            )
+        ):
+            final_state = restore_checkpoint(checkpoint_state, final_state)
         terminal_run_data = dict(run_data)
         terminal_run_data["state"] = final_state
         terminal_run_data["status"] = "completed"

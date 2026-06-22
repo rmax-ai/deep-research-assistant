@@ -1206,6 +1206,8 @@ async def draft_generate(ctx: Context, node_input: Any) -> dict[str, Any]:
     claims = state.get("app:claims", [])
     evidence = state.get("app:evidence", [])
     if not outline.get("sections"):
+        state["app:drafts"] = []
+        state["app:phase"] = "drafting"
         return {"sections_drafted": 0, "message": "No outline sections to draft"}
 
     from deep_research.agents.section_writer import section_writer
@@ -1238,11 +1240,21 @@ async def verify_draft(ctx: Context, node_input: Any) -> dict[str, Any]:
     """Real verification: citation entailment + semantic check via Verifier agent."""
     state = get_state()
     drafts = state.get("app:drafts", [])
+    outline = state.get("app:outline", {})
     claims = state.get("app:claims", [])
     evidence = state.get("app:evidence", [])
 
     if not drafts:
+        outline_sections = outline.get("sections", [])
+        if not outline_sections:
+            result = {"blocking_findings": 0, "passed": True, "message": "No outline sections required drafting"}
+            state["app:verify_result"] = result
+            state["app:verification"] = result
+            ctx.route = 1
+            return result
+
         result = {"blocking_findings": 1, "passed": False, "message": "No drafts to verify"}
+        state["app:verify_result"] = result
         state["app:verification"] = result
         ctx.route = 0
         return result
