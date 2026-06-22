@@ -126,6 +126,33 @@ class TestAPIHealth:
         data = response.json()
         assert data["status"] == "ok"
 
+    async def test_cors_preflight_for_create_run(self, client):
+        response = await client.options(
+            "/v1/research-runs",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+        assert "POST" in response.headers["access-control-allow-methods"]
+
+    async def test_cors_preflight_allows_other_localhost_ports(self, client):
+        response = await client.options(
+            "/v1/research-runs",
+            headers={
+                "Origin": "http://localhost:4321",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "http://localhost:4321"
+
 
 @pytest.mark.asyncio
 class TestCreateRun:

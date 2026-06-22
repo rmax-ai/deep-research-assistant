@@ -187,6 +187,19 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8080
     api_reload: bool = False
+    api_cors_allowed_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:4173",
+            "http://127.0.0.1:4173",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ],
+        description="Allowed browser origins for the demo and local frontend clients.",
+    )
+    api_cors_allowed_origin_regex: str = Field(
+        default=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+        description="Regex allowlist for local browser origins during development.",
+    )
 
     # Logging
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"

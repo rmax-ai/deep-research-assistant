@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from google.adk.agents.base_agent import BaseAgent
 from google.adk.runners import InMemoryRunner
@@ -59,6 +60,15 @@ app = FastAPI(
     version="0.1.0",
     description="Enterprise-grade governed research runtime API",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_settings().api_cors_allowed_origins,
+    allow_origin_regex=get_settings().api_cors_allowed_origin_regex,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 _active_runs: dict[str, dict[str, Any]] = {}
