@@ -95,6 +95,7 @@
       <a href={base + "/architecture/"}>Architecture</a>
       <a href={base + "/phases/"}>Phases</a>
       <a href={base + "/api/"}>API</a>
+      <a href={base + "/demo/"}>Demo</a>
       <a href="https://github.com/rmax-ai/deep-research-assistant" class="gh-link">GitHub ↗</a>
     </div>
   </nav>

@@ -92,15 +92,18 @@ async def client():
 
 @pytest.mark.asyncio
 class TestAPIHealth:
-    async def test_startup_fails_without_required_api_keys(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_startup_allows_health_checks_without_required_api_keys(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
         import deep_research.settings as settings_module
 
         monkeypatch.delenv("DEEP_RESEARCH_EXA_API_KEY", raising=False)
         monkeypatch.setattr(settings_module, "_settings", None)
 
-        with pytest.raises(RuntimeError, match="DEEP_RESEARCH_EXA_API_KEY"):
-            async with routes.lifespan(app):
-                pass
+        async with routes.lifespan(app):
+            health = await routes.health()
+
+        assert health["status"] == "ok"
 
         monkeypatch.setenv("DEEP_RESEARCH_EXA_API_KEY", "test-exa-key")
         monkeypatch.setattr(settings_module, "_settings", None)
@@ -169,6 +172,30 @@ class TestAPIHealth:
 
 @pytest.mark.asyncio
 class TestCreateRun:
+    async def test_create_run_returns_503_when_provider_configuration_is_missing(
+        self, client, monkeypatch: pytest.MonkeyPatch
+    ):
+        import deep_research.settings as settings_module
+
+        monkeypatch.delenv("DEEP_RESEARCH_EXA_API_KEY", raising=False)
+        monkeypatch.setattr(settings_module, "_settings", None)
+
+        response = await client.post(
+            "/v1/research-runs",
+            json={
+                "objective": {
+                    "title": "Unavailable provider",
+                    "primary_question": "Why is run creation unavailable?",
+                }
+            },
+        )
+
+        assert response.status_code == 503
+        assert "DEEP_RESEARCH_EXA_API_KEY" in response.json()["detail"]
+
+        monkeypatch.setenv("DEEP_RESEARCH_EXA_API_KEY", "test-exa-key")
+        monkeypatch.setattr(settings_module, "_settings", None)
+
     async def test_create_minimal(self, client):
         response = await client.post(
             "/v1/research-runs",
@@ -602,3 +629,5 @@ class TestExport:
         assert data["format"] == "markdown"
         assert data["content_length"] > 0
         assert "Report generation in progress" not in data["content"]
+        assert "## Referenced Sources" in data["content"]
+        assert "https://example.com/" in data["content"]

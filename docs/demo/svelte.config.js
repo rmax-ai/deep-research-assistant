@@ -7,7 +7,8 @@ export default {
   kit: {
     adapter: adapter({ pages: "build", assets: "build", fallback: "404.html" }),
     paths: {
-      base: isDev ? "" : (process.env.BASE_PATH ?? "")
+      base: isDev ? "" : (process.env.BASE_PATH ?? ""),
+      relative: false
     }
   }
 };

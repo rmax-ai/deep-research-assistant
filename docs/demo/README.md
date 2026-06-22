@@ -19,5 +19,5 @@ npm run preview
 The app is static and expects a live backend instance. Set the API base URL in the UI, for example:
 
 ```text
-http://127.0.0.1:8000/v1
+http://localhost:8080/v1
 ```

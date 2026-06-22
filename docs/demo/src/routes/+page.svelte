@@ -1,9 +1,10 @@
 <script>
   import { onDestroy, onMount } from "svelte";
 
-  const DEFAULT_API_BASE = "/v1";
+  const DEFAULT_API_BASE = "http://localhost:8080/v1";
   const API_BASE_STORAGE_KEY = "deep-research-demo:api-base";
   const POLL_INTERVAL_MS = 2500;
+  const SUPPLEMENTARY_REFRESH_MS = 5000;
   const TERMINAL_STATUSES = new Set(["completed", "failed", "awaiting_approval", "interrupted"]);
   const APPROVAL_ACTIONS = ["approved", "rejected"];
   const EVENT_TYPES = [
@@ -48,9 +49,11 @@
     userId: "architect-01",
     mode: "review_first"
   };
+  const EMPTY_ERROR_STATE = null;
 
   let form = { ...DEFAULT_FORM };
   let apiBase = DEFAULT_API_BASE;
+  let existingRunId = "";
   let runId = "";
   let runSummary = null;
   let progress = null;
@@ -60,12 +63,13 @@
   let conceptMapData = null;
   let logsData = null;
   let exportData = null;
-  let createError = "";
-  let runError = "";
-  let inspectorError = "";
-  let approvalError = "";
-  let exportError = "";
+  let createError = EMPTY_ERROR_STATE;
+  let runError = EMPTY_ERROR_STATE;
+  let inspectorError = EMPTY_ERROR_STATE;
+  let approvalError = EMPTY_ERROR_STATE;
+  let exportError = EMPTY_ERROR_STATE;
   let submitPending = false;
+  let loadPending = false;
   let initialLoadPending = false;
   let inspectorPending = false;
   let exportPending = false;
@@ -76,6 +80,7 @@
   let approvalRationale = "";
   let activeRunToken = 0;
   let supplementarySnapshotKey = "";
+  let lastSupplementaryRefreshAt = 0;
 
   let pollTimer = null;
   let eventSource = null;
@@ -120,7 +125,7 @@
     const base = normalizedApiBase();
 
     if (response.status === 404 && rawText.startsWith("<!doctype html")) {
-      return `Received an HTML 404 from ${url}. This frontend is not proxying API requests. Set API Base URL to your backend origin, for example http://127.0.0.1:8000/v1.`;
+      return `Received an HTML 404 from ${url}. This frontend is not proxying API requests. Set API Base URL to your backend origin, for example http://localhost:8080/v1.`;
     }
 
     if (rawText) {
@@ -155,10 +160,91 @@
     return payload;
   }
 
+  function normalizeError(error, fallbackDetail) {
+    if (error instanceof Error && error.message.trim()) {
+      return error.message.trim();
+    }
+
+    return fallbackDetail;
+  }
+
+  function describeError(error, context) {
+    const detail = normalizeError(error, context.defaultDetail);
+
+    if (detail.includes("DEEP_RESEARCH_EXA_API_KEY")) {
+      return {
+        title: "Backend provider configuration is missing",
+        detail,
+        hint: "Set DEEP_RESEARCH_EXA_API_KEY on the API server, then retry the run."
+      };
+    }
+
+    if (detail.includes("Received an HTML 404")) {
+      return {
+        title: "API Base URL points at the wrong origin",
+        detail,
+        hint: "Use the backend origin, usually http://localhost:8080/v1, not the static frontend host."
+      };
+    }
+
+    if (detail === "Failed to fetch" || detail.includes("NetworkError")) {
+      return {
+        title: "The API server could not be reached",
+        detail,
+        hint: "Check that the backend is running and that this browser origin is allowed by CORS."
+      };
+    }
+
+    if (detail.includes("status 503")) {
+      return {
+        title: "The backend is temporarily unavailable",
+        detail,
+        hint: "Check the API server logs and runtime configuration, then try again."
+      };
+    }
+
+    if (detail.includes("status 404")) {
+      return {
+        title: context.notFoundTitle,
+        detail,
+        hint: context.notFoundHint
+      };
+    }
+
+    return {
+      title: context.title,
+      detail,
+      hint: context.hint
+    };
+  }
+
   function persistApiBase() {
     if (typeof window !== "undefined") {
       window.localStorage.setItem(API_BASE_STORAGE_KEY, normalizedApiBase());
     }
+  }
+
+  function syncUrlState(nextRunId = runId) {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    const normalizedBase = normalizedApiBase();
+
+    if (nextRunId) {
+      url.searchParams.set("run_id", nextRunId);
+    } else {
+      url.searchParams.delete("run_id");
+    }
+
+    if (normalizedBase && normalizedBase !== DEFAULT_API_BASE) {
+      url.searchParams.set("api_base", normalizedBase);
+    } else {
+      url.searchParams.delete("api_base");
+    }
+
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
   }
 
   async function createRun(payload) {
@@ -214,16 +300,17 @@
     conceptMapData = null;
     logsData = null;
     exportData = null;
-    runError = "";
-    inspectorError = "";
-    approvalError = "";
-    exportError = "";
+    runError = EMPTY_ERROR_STATE;
+    inspectorError = EMPTY_ERROR_STATE;
+    approvalError = EMPTY_ERROR_STATE;
+    exportError = EMPTY_ERROR_STATE;
     approvalActionPending = "";
     approvalRationale = "";
     pollNotice = "";
     streamState = "idle";
     streamNotice = "Start a run to attach the live event stream.";
     supplementarySnapshotKey = "";
+    lastSupplementaryRefreshAt = 0;
   }
 
   function stopPolling() {
@@ -307,68 +394,216 @@
     return source?.title ?? source?.url ?? source?.source_id ?? "Unnamed source";
   }
 
+  function escapeHtml(value) {
+    return String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
+  function renderInlineMarkdown(value) {
+    let html = escapeHtml(value);
+    html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+    html = html.replace(
+      /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+      '<a href="$2" target="_blank" rel="noreferrer">$1</a>'
+    );
+    html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+    return html;
+  }
+
+  function renderMarkdown(markdown) {
+    if (!markdown) {
+      return "";
+    }
+
+    const lines = String(markdown).replace(/\r\n/g, "\n").split("\n");
+    const html = [];
+    let paragraph = [];
+    let listItems = [];
+    let inCodeBlock = false;
+    let codeLines = [];
+
+    function flushParagraph() {
+      if (paragraph.length === 0) {
+        return;
+      }
+
+      html.push(`<p>${renderInlineMarkdown(paragraph.join(" "))}</p>`);
+      paragraph = [];
+    }
+
+    function flushList() {
+      if (listItems.length === 0) {
+        return;
+      }
+
+      html.push(`<ol>${listItems.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("")}</ol>`);
+      listItems = [];
+    }
+
+    function flushCodeBlock() {
+      if (!inCodeBlock) {
+        return;
+      }
+
+      html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+      inCodeBlock = false;
+      codeLines = [];
+    }
+
+    for (const line of lines) {
+      if (line.startsWith("```")) {
+        flushParagraph();
+        flushList();
+        if (inCodeBlock) {
+          flushCodeBlock();
+        } else {
+          inCodeBlock = true;
+        }
+        continue;
+      }
+
+      if (inCodeBlock) {
+        codeLines.push(line);
+        continue;
+      }
+
+      const heading = line.match(/^(#{1,6})\s+(.*)$/);
+      if (heading) {
+        flushParagraph();
+        flushList();
+        const level = heading[1].length;
+        html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+        continue;
+      }
+
+      const orderedItem = line.match(/^\d+\.\s+(.*)$/);
+      if (orderedItem) {
+        flushParagraph();
+        listItems.push(orderedItem[1]);
+        continue;
+      }
+
+      const bulletItem = line.match(/^[-*]\s+(.*)$/);
+      if (bulletItem) {
+        flushParagraph();
+        listItems.push(bulletItem[1]);
+        continue;
+      }
+
+      if (!line.trim()) {
+        flushParagraph();
+        flushList();
+        continue;
+      }
+
+      flushList();
+      paragraph.push(line.trim());
+    }
+
+    flushParagraph();
+    flushList();
+    flushCodeBlock();
+    return html.join("");
+  }
+
   function sortedApprovals() {
     return Object.entries(approvalsData?.approvals ?? {}).sort(([left], [right]) => left.localeCompare(right));
   }
 
   async function hydrateSupplementaryData(targetRunId, token) {
-    inspectorPending = true;
-    inspectorError = "";
-
-    const results = await Promise.allSettled([
-      fetchApprovals(targetRunId),
-      fetchGraph(targetRunId),
-      fetchConceptMap(targetRunId),
-      fetchLogs(targetRunId)
-    ]);
-
-    if (token !== activeRunToken) {
+    if (inspectorPending) {
       return;
     }
 
-    const [approvalsResult, graphResult, conceptMapResult, logsResult] = results;
-    const failures = [];
+    inspectorPending = true;
+    inspectorError = EMPTY_ERROR_STATE;
 
-    if (approvalsResult.status === "fulfilled") {
-      approvalsData = approvalsResult.value;
-    } else {
-      failures.push("approvals");
+    try {
+      const results = await Promise.allSettled([
+        fetchApprovals(targetRunId),
+        fetchGraph(targetRunId),
+        fetchConceptMap(targetRunId),
+        fetchLogs(targetRunId)
+      ]);
+
+      if (token !== activeRunToken) {
+        return;
+      }
+
+      lastSupplementaryRefreshAt = Date.now();
+
+      const [approvalsResult, graphResult, conceptMapResult, logsResult] = results;
+      const failures = [];
+
+      if (approvalsResult.status === "fulfilled") {
+        approvalsData = approvalsResult.value;
+      } else {
+        failures.push("approvals");
+      }
+
+      if (graphResult.status === "fulfilled") {
+        graphData = graphResult.value;
+      } else {
+        failures.push("graph");
+      }
+
+      if (conceptMapResult.status === "fulfilled") {
+        conceptMapData = conceptMapResult.value;
+      } else {
+        failures.push("concept map");
+      }
+
+      if (logsResult.status === "fulfilled") {
+        logsData = logsResult.value;
+      } else {
+        failures.push("logs");
+      }
+
+      inspectorError =
+        failures.length > 0
+          ? {
+              title: "Some inspector panels did not refresh",
+              detail: `The following panels failed to load: ${failures.join(", ")}.`,
+              hint: "The run can still be inspected. Retry after the API becomes reachable."
+            }
+          : EMPTY_ERROR_STATE;
+    } finally {
+      inspectorPending = false;
     }
-
-    if (graphResult.status === "fulfilled") {
-      graphData = graphResult.value;
-    } else {
-      failures.push("graph");
-    }
-
-    if (conceptMapResult.status === "fulfilled") {
-      conceptMapData = conceptMapResult.value;
-    } else {
-      failures.push("concept map");
-    }
-
-    if (logsResult.status === "fulfilled") {
-      logsData = logsResult.value;
-    } else {
-      failures.push("logs");
-    }
-
-    inspectorError =
-      failures.length > 0
-        ? `Some Phase 2 panels could not refresh: ${failures.join(", ")}.`
-        : "";
-    inspectorPending = false;
   }
 
   function maybeHydrateSupplementary(targetRunId, status, token) {
-    const nextKey = `${targetRunId}:${TERMINAL_STATUSES.has(status) ? status : "live"}`;
+    const isTerminal = TERMINAL_STATUSES.has(status);
+    const nextKey = `${targetRunId}:${isTerminal ? status : "live"}`;
 
-    if (supplementarySnapshotKey === nextKey && graphData && conceptMapData && logsData) {
+    if (isTerminal) {
+      if (
+        supplementarySnapshotKey === nextKey &&
+        approvalsData &&
+        graphData &&
+        conceptMapData &&
+        logsData
+      ) {
+        return;
+      }
+
+      supplementarySnapshotKey = nextKey;
+      hydrateSupplementaryData(targetRunId, token);
       return;
     }
 
+    const hasHydratedLiveData = approvalsData && graphData && conceptMapData && logsData;
+    const refreshIsDue = Date.now() - lastSupplementaryRefreshAt >= SUPPLEMENTARY_REFRESH_MS;
+
     supplementarySnapshotKey = nextKey;
-    hydrateSupplementaryData(targetRunId, token);
+    if (!hasHydratedLiveData || refreshIsDue) {
+      hydrateSupplementaryData(targetRunId, token);
+    }
   }
 
   function summarizeEvent(eventRecord) {
@@ -411,7 +646,7 @@
 
       runSummary = nextSummary;
       progress = nextProgress;
-      runError = "";
+      runError = EMPTY_ERROR_STATE;
       pollNotice = `Polling every ${Math.round(POLL_INTERVAL_MS / 1000)}s`;
       maybeHydrateSupplementary(targetRunId, nextSummary.status, token);
 
@@ -429,7 +664,13 @@
         return;
       }
 
-      runError = error instanceof Error ? error.message : "Unable to refresh run state.";
+      runError = describeError(error, {
+        title: "The run summary could not be refreshed",
+        defaultDetail: "Unable to refresh run state.",
+        notFoundTitle: "The requested run was not found",
+        notFoundHint: "Check the run id and API base URL, then try loading the run again.",
+        hint: "Retry once the API server is reachable."
+      });
       pollNotice = "Polling failed. Retrying while the run remains active.";
     } finally {
       if (token === activeRunToken) {
@@ -501,8 +742,8 @@
     event.preventDefault();
     persistApiBase();
     submitPending = true;
-    createError = "";
-    runError = "";
+    createError = EMPTY_ERROR_STATE;
+    runError = EMPTY_ERROR_STATE;
     resetRunState();
     stopWatchingRun();
 
@@ -519,12 +760,58 @@
       });
 
       runId = createdRun.run_id;
+      existingRunId = createdRun.run_id;
       runSummary = createdRun;
+      syncUrlState(createdRun.run_id);
       startWatchingRun(runId);
     } catch (error) {
-      createError = error instanceof Error ? error.message : "Unable to create research run.";
+      createError = describeError(error, {
+        title: "The research run could not be created",
+        defaultDetail: "Unable to create research run.",
+        notFoundTitle: "The API route was not found",
+        notFoundHint: "Check the API base URL. It should usually end with /v1.",
+        hint: "Review the request and backend logs, then retry."
+      });
     } finally {
       submitPending = false;
+    }
+  }
+
+  async function handleLoadExistingRun(event) {
+    event.preventDefault();
+    const targetRunId = existingRunId.trim();
+
+    if (!targetRunId) {
+      createError = {
+        title: "A run id is required",
+        detail: "Enter a run id to load an existing research run.",
+        hint: "Paste a previously created run id and try again."
+      };
+      return;
+    }
+
+    persistApiBase();
+    loadPending = true;
+    createError = EMPTY_ERROR_STATE;
+    runError = EMPTY_ERROR_STATE;
+    resetRunState();
+    stopWatchingRun();
+
+    try {
+      runId = targetRunId;
+      existingRunId = targetRunId;
+      syncUrlState(targetRunId);
+      startWatchingRun(targetRunId);
+    } catch (error) {
+      createError = describeError(error, {
+        title: "The requested run could not be loaded",
+        defaultDetail: "Unable to load research run.",
+        notFoundTitle: "The run could not be found",
+        notFoundHint: "Confirm the run id exists on this backend and that the API base URL is correct.",
+        hint: "Retry after confirming the backend is reachable."
+      });
+    } finally {
+      loadPending = false;
     }
   }
 
@@ -543,7 +830,7 @@
     }
 
     approvalActionPending = `${approvalId}:${decision}`;
-    approvalError = "";
+    approvalError = EMPTY_ERROR_STATE;
 
     try {
       await submitApproval(runId, approvalId, {
@@ -555,7 +842,13 @@
       await hydrateSupplementaryData(runId, activeRunToken);
       startWatchingRun(runId);
     } catch (error) {
-      approvalError = error instanceof Error ? error.message : "Unable to submit approval.";
+      approvalError = describeError(error, {
+        title: "The approval decision could not be submitted",
+        defaultDetail: "Unable to submit approval.",
+        notFoundTitle: "The approval target was not found",
+        notFoundHint: "Refresh the run state to confirm the gate still exists before retrying.",
+        hint: "Retry after the run summary has refreshed."
+      });
     } finally {
       approvalActionPending = "";
     }
@@ -567,21 +860,42 @@
     }
 
     exportPending = true;
-    exportError = "";
+    exportError = EMPTY_ERROR_STATE;
 
     try {
       exportData = await exportRun(runId);
     } catch (error) {
-      exportError = error instanceof Error ? error.message : "Unable to export report.";
+      exportError = describeError(error, {
+        title: "The report export could not be generated",
+        defaultDetail: "Unable to export report.",
+        notFoundTitle: "The export target was not found",
+        notFoundHint: "Reload the run and retry the export once the backend confirms it exists.",
+        hint: "Retry after the run reaches a stable state."
+      });
     } finally {
       exportPending = false;
     }
   }
 
   onMount(() => {
+    const url = new URL(window.location.href);
     const saved = window.localStorage.getItem(API_BASE_STORAGE_KEY);
-    if (saved) {
+    const apiBaseParam = url.searchParams.get("api_base");
+    const runIdParam = url.searchParams.get("run_id");
+
+    if (apiBaseParam) {
+      apiBase = apiBaseParam;
+    } else if (saved) {
       apiBase = saved;
+    }
+
+    if (runIdParam) {
+      existingRunId = runIdParam;
+      runId = runIdParam;
+      syncUrlState(runIdParam);
+      startWatchingRun(runIdParam);
+    } else {
+      syncUrlState("");
     }
   });
 
@@ -632,7 +946,7 @@
           <input
             bind:value={apiBase}
             name="api-base"
-            placeholder="http://127.0.0.1:8000/v1"
+            placeholder="http://localhost:8080/v1"
             on:blur={persistApiBase}
           />
         </label>
@@ -678,8 +992,29 @@
           </button>
         </div>
 
+        <div class="divider">
+          <span>or</span>
+        </div>
+
+        <div class="load-run">
+          <label>
+            <span>Existing Run ID</span>
+            <input bind:value={existingRunId} name="existing-run-id" placeholder="071521de" />
+          </label>
+
+          <button class="btn tertiary" type="button" on:click={handleLoadExistingRun} disabled={loadPending}>
+            {loadPending ? "Loading run…" : "Load existing run"}
+          </button>
+        </div>
+
         {#if createError}
-          <p class="notice error">{createError}</p>
+          <div class="error-card" role="alert">
+            <strong>{createError.title}</strong>
+            <p>{createError.detail}</p>
+            {#if createError.hint}
+              <small>{createError.hint}</small>
+            {/if}
+          </div>
         {/if}
       </form>
     </article>
@@ -765,7 +1100,13 @@
             <p class="notice">{pollNotice || "Polling will begin after the run is created."}</p>
             <p class={`notice ${streamState === "disconnected" ? "warn" : ""}`}>{streamNotice}</p>
             {#if runError}
-              <p class="notice error">{runError}</p>
+              <div class="error-card" role="alert">
+                <strong>{runError.title}</strong>
+                <p>{runError.detail}</p>
+                {#if runError.hint}
+                  <small>{runError.hint}</small>
+                {/if}
+              </div>
             {/if}
           </div>
         </div>
@@ -845,7 +1186,7 @@
             ></textarea>
           </label>
 
-          <div class="approval-list">
+          <div class="approval-list scroll-pane">
             {#each sortedApprovals() as [approvalId, approval]}
               <article class="approval-card">
                 <div class="approval-header">
@@ -883,7 +1224,13 @@
           </div>
 
           {#if approvalError}
-            <p class="notice error">{approvalError}</p>
+            <div class="error-card" role="alert">
+              <strong>{approvalError.title}</strong>
+              <p>{approvalError.detail}</p>
+              {#if approvalError.hint}
+                <small>{approvalError.hint}</small>
+              {/if}
+            </div>
           {/if}
         </div>
       {/if}
@@ -928,7 +1275,7 @@
             {#if (graphData.claims?.length ?? 0) === 0}
               <p class="muted">No claims recorded yet.</p>
             {:else}
-              <ul class="plain-list">
+              <ul class="plain-list scroll-pane">
                 {#each graphData.claims.slice(0, 4) as claim}
                   <li>{summarizeClaim(claim)}</li>
                 {/each}
@@ -987,7 +1334,7 @@
           {#if (conceptMapData.topic_nodes?.length ?? 0) === 0}
             <p class="muted">No topic nodes projected yet.</p>
           {:else}
-            <div class="chip-cloud">
+            <div class="chip-cloud scroll-pane">
               {#each conceptMapData.topic_nodes.slice(0, 8) as node}
                 <span class="chip">{node.label} · {node.type}</span>
               {/each}
@@ -1022,7 +1369,7 @@
           <small>The backend may not have persisted any records yet for this run.</small>
         </div>
       {:else}
-        <div class="log-list">
+        <div class="log-list scroll-pane">
           {#each logsData.records.slice(0, 8) as record}
             <article class="log-item">
               <div class="timeline-meta">
@@ -1079,15 +1426,27 @@
           <p class="notice warn">{exportData.note}</p>
         {/if}
 
-        <pre>{exportData.content}</pre>
+        <div class="markdown-report">{@html renderMarkdown(exportData.content)}</div>
       </div>
     {/if}
 
     {#if exportError}
-      <p class="notice error">{exportError}</p>
+      <div class="error-card" role="alert">
+        <strong>{exportError.title}</strong>
+        <p>{exportError.detail}</p>
+        {#if exportError.hint}
+          <small>{exportError.hint}</small>
+        {/if}
+      </div>
     {/if}
     {#if inspectorError}
-      <p class="notice warn">{inspectorError}</p>
+      <div class="error-card warn" role="status">
+        <strong>{inspectorError.title}</strong>
+        <p>{inspectorError.detail}</p>
+        {#if inspectorError.hint}
+          <small>{inspectorError.hint}</small>
+        {/if}
+      </div>
     {/if}
   </section>
 </section>
@@ -1271,6 +1630,42 @@
     margin-top: 0.25rem;
   }
 
+  .divider {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0.25rem 0;
+  }
+
+  .divider::before {
+    content: "";
+    position: absolute;
+    inset: 50% 0 auto;
+    border-top: 1px solid var(--line);
+  }
+
+  .divider span {
+    position: relative;
+    z-index: 1;
+    padding: 0 0.8rem;
+    background: rgba(255, 251, 244, 0.96);
+    color: var(--text-soft);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .load-run {
+    display: grid;
+    gap: 0.85rem;
+    padding: 1rem;
+    border-radius: 18px;
+    border: 1px solid rgba(22, 50, 79, 0.08);
+    background: rgba(255, 255, 255, 0.4);
+  }
+
   .btn {
     border: none;
     border-radius: 999px;
@@ -1334,6 +1729,31 @@
   .empty-state small,
   .notice {
     color: var(--text-soft);
+  }
+
+  .error-card {
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.95rem 1rem;
+    border-radius: 18px;
+    border: 1px solid rgba(124, 38, 51, 0.18);
+    background: rgba(124, 38, 51, 0.06);
+    color: #7c2633;
+  }
+
+  .error-card strong {
+    font-size: 0.92rem;
+  }
+
+  .error-card p,
+  .error-card small {
+    color: inherit;
+  }
+
+  .error-card.warn {
+    border-color: rgba(214, 111, 69, 0.18);
+    background: rgba(214, 111, 69, 0.08);
+    color: #9f582f;
   }
 
   .summary-stack {
@@ -1452,10 +1872,53 @@
     gap: 1rem;
   }
 
+  .markdown-report {
+    display: grid;
+    gap: 0.9rem;
+    padding: 1.1rem;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.52);
+    border: 1px solid rgba(22, 50, 79, 0.07);
+  }
+
+  .markdown-report :global(h1),
+  .markdown-report :global(h2),
+  .markdown-report :global(h3),
+  .markdown-report :global(h4),
+  .markdown-report :global(h5),
+  .markdown-report :global(h6) {
+    margin: 0;
+    line-height: 1.15;
+  }
+
+  .markdown-report :global(p),
+  .markdown-report :global(ol),
+  .markdown-report :global(ul),
+  .markdown-report :global(pre) {
+    margin: 0;
+  }
+
+  .markdown-report :global(ol),
+  .markdown-report :global(ul) {
+    padding-left: 1.4rem;
+  }
+
+  .markdown-report :global(li) {
+    color: var(--text-body);
+    margin: 0.3rem 0;
+  }
+
   .approval-list,
   .log-list {
     display: grid;
     gap: 0.8rem;
+  }
+
+  .scroll-pane {
+    max-height: 24rem;
+    overflow-y: auto;
+    padding-right: 0.35rem;
+    scrollbar-gutter: stable;
   }
 
   .approval-card,
@@ -1581,6 +2044,9 @@
   .timeline-list {
     display: grid;
     gap: 0.9rem;
+    max-height: min(65vh, 960px);
+    overflow-y: auto;
+    padding-right: 0.35rem;
   }
 
   .timeline-item {

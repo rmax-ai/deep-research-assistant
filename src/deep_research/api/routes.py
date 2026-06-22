@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -45,28 +46,29 @@ configure_logging()
 logger = logging.getLogger(__name__)
 
 
-def _validate_startup_configuration() -> None:
-    """Fail API startup when required external integrations are not configured."""
+def _missing_runtime_configuration() -> list[str]:
+    """Return missing external provider settings required for run execution."""
     settings = get_settings()
     missing: list[str] = []
 
     if not settings.exa_api_key:
         missing.append("DEEP_RESEARCH_EXA_API_KEY")
 
-    if missing:
-        missing_list = ", ".join(missing)
-        raise RuntimeError(
-            "API server startup aborted: missing required configuration for external providers: "
-            f"{missing_list}"
-        )
+    return missing
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Initialize and dispose app-scoped resources."""
-    _validate_startup_configuration()
     await init_database()
-    await _resume_incomplete_runs()
+    missing = _missing_runtime_configuration()
+    if missing:
+        logger.warning(
+            "runtime provider configuration is incomplete; run execution disabled",
+            extra={"missing_configuration": missing},
+        )
+    else:
+        await _resume_incomplete_runs()
     yield
     await _cancel_background_tasks()
     await close_database()
@@ -236,6 +238,212 @@ def _default_approval_inputs() -> dict[str, dict[str, str]]:
     if get_settings().approvals.mode != "auto_approve":
         return {}
     return {gate: {"status": "approved"} for gate in ("A", "B", "C", "D")}
+
+
+def _source_reference_lines(state: dict[str, Any]) -> list[str]:
+    """Build a stable markdown reference section from run sources."""
+    sources = state.get("app:sources", [])
+    if not isinstance(sources, list) or not sources:
+        return []
+
+    lines = ["## Referenced Sources", ""]
+    for index, source in enumerate(sources, start=1):
+        if not isinstance(source, dict):
+            continue
+
+        title = str(source.get("title") or source.get("source_id") or f"Source {index}").strip()
+        url = str(source.get("url") or "").strip()
+        source_type = str(source.get("source_type") or "").strip()
+        publisher = str(source.get("publisher") or "").strip()
+
+        parts = [f"{index}. "]
+        if url:
+            parts.append(f"[{title}]({url})")
+        else:
+            parts.append(title)
+
+        qualifiers = [value for value in (source_type, publisher) if value]
+        if qualifiers:
+            parts.append(f" ({', '.join(qualifiers)})")
+
+        lines.append("".join(parts))
+
+    if len(lines) == 2:
+        return []
+
+    return lines
+
+
+def _normalize_source_identity(source: dict[str, Any]) -> str:
+    """Return a stable identity string for a source-like record."""
+    for field in ("url", "canonical_uri", "source_id", "title"):
+        value = str(source.get(field, "") or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _build_source_lookup(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Index known sources by stable identifiers used across pipeline stages."""
+    lookup: dict[str, dict[str, Any]] = {}
+    for source in state.get("app:sources", []):
+        if not isinstance(source, dict):
+            continue
+
+        normalized = {
+            "title": str(source.get("title", "") or "").strip(),
+            "url": str(source.get("url") or source.get("canonical_uri") or "").strip(),
+            "source_id": str(source.get("source_id", "") or "").strip(),
+            "source_type": str(source.get("source_type", "") or "").strip(),
+            "publisher": str(source.get("publisher", "") or "").strip(),
+        }
+
+        for key in {
+            normalized["url"],
+            normalized["source_id"],
+            _normalize_source_identity(normalized),
+        }:
+            if key:
+                lookup.setdefault(key, normalized)
+
+    return lookup
+
+
+def _source_from_reference(
+    source_ref: str,
+    source_lookup: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Resolve a source identifier into a normalized export record."""
+    ref = str(source_ref or "").strip()
+    if not ref:
+        return None
+
+    source = source_lookup.get(ref)
+    if source is not None:
+        return source
+
+    return {
+        "title": ref,
+        "url": ref if ref.startswith(("http://", "https://")) else "",
+        "source_id": ref,
+        "source_type": "",
+        "publisher": "",
+    }
+
+
+def _resolve_citation_sources(
+    citation_number: int,
+    *,
+    state: dict[str, Any],
+    source_lookup: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Resolve one bracket citation number into one or more concrete sources."""
+    evidence = state.get("app:evidence", [])
+    claims = state.get("app:claims", [])
+    sources = state.get("app:sources", [])
+    zero_index = citation_number - 1
+    resolved: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add_source(candidate: dict[str, Any] | None) -> None:
+        if not candidate:
+            return
+        identity = _normalize_source_identity(candidate)
+        if not identity or identity in seen:
+            return
+        seen.add(identity)
+        resolved.append(candidate)
+
+    if 0 <= zero_index < len(evidence):
+        evidence_item = evidence[zero_index]
+        if isinstance(evidence_item, dict):
+            add_source(_source_from_reference(str(evidence_item.get("source_id", "")), source_lookup))
+
+    if 0 <= zero_index < len(claims):
+        claim = claims[zero_index]
+        if isinstance(claim, dict):
+            for evidence_ref in claim.get("evidence_ids", []):
+                evidence_item: dict[str, Any] | None = None
+                if isinstance(evidence_ref, int) and 0 <= evidence_ref < len(evidence):
+                    raw_evidence = evidence[evidence_ref]
+                    evidence_item = raw_evidence if isinstance(raw_evidence, dict) else None
+                else:
+                    evidence_key = str(evidence_ref or "").strip()
+                    evidence_item = next(
+                        (
+                            item
+                            for item in evidence
+                            if isinstance(item, dict) and str(item.get("evidence_id", "")).strip() == evidence_key
+                        ),
+                        None,
+                    )
+
+                if evidence_item is not None:
+                    add_source(_source_from_reference(str(evidence_item.get("source_id", "")), source_lookup))
+
+    if 0 <= zero_index < len(sources):
+        raw_source = sources[zero_index]
+        if isinstance(raw_source, dict):
+            direct_source = _source_from_reference(_normalize_source_identity(raw_source), source_lookup)
+            add_source(direct_source or raw_source)
+
+    return resolved
+
+
+def _rewrite_report_references(report: str, state: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+    """Rewrite bracket citations to a compact export-local numbering scheme."""
+    source_lookup = _build_source_lookup(state)
+    ordered_sources: list[dict[str, Any]] = []
+    source_numbers: dict[str, int] = {}
+
+    def replacement(match: re.Match[str]) -> str:
+        citation_number = int(match.group(1))
+        resolved_sources = _resolve_citation_sources(citation_number, state=state, source_lookup=source_lookup)
+        if not resolved_sources:
+            return match.group(0)
+
+        assigned_numbers: list[int] = []
+        for source in resolved_sources:
+            identity = _normalize_source_identity(source)
+            if not identity:
+                continue
+            number = source_numbers.get(identity)
+            if number is None:
+                number = len(ordered_sources) + 1
+                source_numbers[identity] = number
+                ordered_sources.append(source)
+            assigned_numbers.append(number)
+
+        if not assigned_numbers:
+            return match.group(0)
+
+        return "[" + ", ".join(str(number) for number in assigned_numbers) + "]"
+
+    rewritten_report = re.sub(r"\[(\d+)\]", replacement, report)
+    return rewritten_report, ordered_sources
+
+
+def _build_export_markdown(run_data: dict[str, Any]) -> str:
+    """Build export markdown with a guaranteed source reference appendix."""
+    report = str(run_data.get("report", "") or "").rstrip()
+    state = run_data.get("state", {})
+    if not isinstance(state, dict):
+        state = {}
+
+    report, referenced_sources = _rewrite_report_references(report, state)
+    reference_state = {**state, "app:sources": referenced_sources}
+    reference_lines = _source_reference_lines(reference_state)
+    if not report:
+        title = run_data.get("objective", {}).get("title", "Research Report")
+        report = f"# {title}\n\n*Report generation in progress or no evidence collected yet.*"
+
+    if not reference_lines:
+        return report
+
+    if "## Referenced Sources" in report:
+        return report
+
+    return f"{report}\n\n" + "\n".join(reference_lines)
 
 
 def _build_objective_text(request: ObjectiveRequest) -> str:
@@ -484,6 +692,16 @@ async def health() -> dict[str, str]:
 @app.post("/v1/research-runs", response_model=RunStatusResponse)
 async def create_research_run(request: CreateRunRequest) -> RunStatusResponse:
     """Create a new research run and execute it asynchronously."""
+    missing = _missing_runtime_configuration()
+    if missing:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Research run execution is unavailable because required external provider "
+                f"configuration is missing: {', '.join(missing)}"
+            ),
+        )
+
     run_id = str(uuid.uuid4())[:8]
     session_id = f"session_{run_id}"
     state: dict[str, Any] = {}
@@ -792,12 +1010,13 @@ async def get_approvals(run_id: str) -> dict[str, Any]:
 async def export_report(run_id: str, format: str = "markdown") -> dict[str, Any]:
     """Export the final report in the requested format."""
     run_data = await _require_run(run_id)
-    report = run_data.get("report", "")
-    if not report:
+    raw_report = str(run_data.get("report", "") or "")
+    report = _build_export_markdown(run_data)
+    if not raw_report:
         return {
             "run_id": run_id,
             "format": format,
-            "content": f"# {run_data.get('objective', {}).get('title', 'Research Report')}\n\n*Report generation in progress or no evidence collected yet.*",
+            "content": report,
             "content_length": 0,
             "note": "Report is empty — pipeline may have run in stub mode (LLM unavailable)",
         }
