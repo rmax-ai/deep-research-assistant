@@ -1242,6 +1242,17 @@ async def repair_draft(ctx: Context, node_input: Any) -> dict[str, Any]:
     verification = state.get("app:verification", {})
     repair_count = state.get("app:repair_count", 0)
     max_repair_passes = 2
+    findings = verification.get("findings", [])
+    blocking_findings = int(verification.get("blocking_findings", 0) or 0)
+    drafts = state.get("app:drafts", [])
+
+    if blocking_findings > 0 and not drafts:
+        state["app:phase"] = "failed"
+        raise RuntimeError("Verification failed with blocking findings but no drafts exist to repair")
+
+    if blocking_findings > 0 and not findings:
+        state["app:phase"] = "failed"
+        raise RuntimeError("Verification failed with blocking findings but no repairable findings were recorded")
 
     if repair_count >= max_repair_passes:
         state["app:phase"] = "failed"
@@ -1252,8 +1263,8 @@ async def repair_draft(ctx: Context, node_input: Any) -> dict[str, Any]:
     from deep_research.nodes.verification import repair_loop
 
     repair_result = repair_loop(
-        findings=verification.get("findings", []),
-        drafts=state.get("app:drafts", []),
+        findings=findings,
+        drafts=drafts,
         max_repairs=max_repair_passes,
     )
 

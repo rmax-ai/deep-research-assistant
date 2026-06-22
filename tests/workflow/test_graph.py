@@ -244,6 +244,52 @@ class TestWorkflowGraph:
 
         assert state["app:phase"] == "failed"
 
+    async def test_repair_draft_fails_immediately_when_no_drafts_exist(self):
+        from deep_research.workflow.graph import repair_draft
+        from deep_research.workflow.state import get_state, reset_state
+
+        reset_state()
+        state = get_state()
+        state.update(
+            {
+                "app:verification": {
+                    "blocking_findings": 1,
+                    "findings": [],
+                    "passed": False,
+                },
+                "app:repair_count": 0,
+                "app:drafts": [],
+            }
+        )
+
+        with pytest.raises(RuntimeError, match="no drafts exist to repair"):
+            await repair_draft(SimpleNamespace(route=None), None)
+
+        assert state["app:phase"] == "failed"
+
+    async def test_repair_draft_fails_when_blocking_findings_have_no_repairable_details(self):
+        from deep_research.workflow.graph import repair_draft
+        from deep_research.workflow.state import get_state, reset_state
+
+        reset_state()
+        state = get_state()
+        state.update(
+            {
+                "app:verification": {
+                    "blocking_findings": 1,
+                    "findings": [],
+                    "passed": False,
+                },
+                "app:repair_count": 0,
+                "app:drafts": [{"content": "Draft"}],
+            }
+        )
+
+        with pytest.raises(RuntimeError, match="no repairable findings were recorded"):
+            await repair_draft(SimpleNamespace(route=None), None)
+
+        assert state["app:phase"] == "failed"
+
     async def test_repair_draft_updates_verification_state_after_successful_repair(self):
         from deep_research.workflow.graph import repair_draft
         from deep_research.workflow.state import get_state, reset_state
