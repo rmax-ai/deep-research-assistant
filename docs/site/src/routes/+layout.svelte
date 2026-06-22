@@ -1,7 +1,76 @@
 <script>
+  import { afterNavigate } from "$app/navigation";
   import { base } from "$app/paths";
+  import { onMount, tick } from "svelte";
 
   let { children } = $props();
+
+  const COPY_RESET_DELAY_MS = 1600;
+
+  function resetButtonLabel(button) {
+    window.setTimeout(() => {
+      button.disabled = false;
+      button.textContent = "Copy";
+    }, COPY_RESET_DELAY_MS);
+  }
+
+  async function writeToClipboard(text) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    const fallback = document.createElement("textarea");
+    fallback.value = text;
+    fallback.setAttribute("readonly", "true");
+    fallback.style.position = "absolute";
+    fallback.style.left = "-9999px";
+    document.body.append(fallback);
+    fallback.select();
+    document.execCommand("copy");
+    fallback.remove();
+  }
+
+  function enhanceCodeBlocks() {
+    for (const pre of document.querySelectorAll("article.doc pre")) {
+      if (pre.dataset.copyEnhanced === "true") {
+        continue;
+      }
+
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "copy-code-button";
+      button.textContent = "Copy";
+      button.addEventListener("click", async () => {
+        const code = pre.querySelector("code")?.textContent?.replace(/\n$/, "") ?? "";
+        button.disabled = true;
+
+        try {
+          await writeToClipboard(code);
+          button.textContent = "Copied";
+        } catch {
+          button.textContent = "Failed";
+        }
+
+        resetButtonLabel(button);
+      });
+
+      pre.dataset.copyEnhanced = "true";
+      pre.append(button);
+    }
+  }
+
+  onMount(() => {
+    const applyEnhancements = async () => {
+      await tick();
+      enhanceCodeBlocks();
+    };
+
+    void applyEnhancements();
+    afterNavigate(() => {
+      void applyEnhancements();
+    });
+  });
 </script>
 
 <svelte:head>
@@ -85,19 +154,48 @@
   }
 
   :global(pre) {
+    position: relative;
     background: rgba(255, 252, 247, 0.82);
     border: 1px solid var(--line);
     border-radius: 18px;
-    padding: 1.1rem;
+    padding: 2.85rem 1.1rem 1.1rem;
     overflow-x: auto;
     margin: 1rem 0;
     box-shadow: var(--shadow);
   }
 
   :global(pre code) {
+    display: block;
     background: none;
     padding: 0;
     color: var(--text-strong);
+  }
+
+  :global(.copy-code-button) {
+    position: absolute;
+    top: 0.8rem;
+    right: 0.8rem;
+    border: 1px solid rgba(22, 50, 79, 0.16);
+    border-radius: 999px;
+    padding: 0.35rem 0.75rem;
+    background: rgba(255, 255, 255, 0.9);
+    color: var(--text-body);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+
+  :global(.copy-code-button:hover:enabled) {
+    background: rgba(255, 255, 255, 1);
+    color: var(--text-strong);
+    border-color: rgba(22, 50, 79, 0.24);
+  }
+
+  :global(.copy-code-button:disabled) {
+    cursor: default;
+    opacity: 0.78;
   }
 
   :global(a) {
