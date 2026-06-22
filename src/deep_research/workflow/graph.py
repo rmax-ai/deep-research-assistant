@@ -40,7 +40,7 @@ from deep_research.storage.repositories import (
 )
 from deep_research.telemetry.events import get_event_bus
 from deep_research.workflow.recovery import create_checkpoint
-from deep_research.workflow.state import get_state
+from deep_research.workflow.state import get_state, set_state
 from deep_research.workflow.stopping import evaluate_stopping
 
 logger = logging.getLogger(__name__)
@@ -176,9 +176,52 @@ async def _publish_route_selection(state: dict[str, Any], node: str, route: int)
     )
 
 
+def _session_state(ctx: Context) -> dict[str, Any] | None:
+    """Return the mutable session state dict when available."""
+    session = getattr(ctx, "session", None)
+    state = getattr(session, "state", None)
+    return state if isinstance(state, dict) else None
+
+
+def _hydrate_state(ctx: Context) -> dict[str, Any]:
+    """Hydrate context-local workflow state from the ADK session state.
+
+    The workflow uses a context-local state store for convenient access inside
+    nodes, but ADK routing and node boundaries persist via ``ctx.session.state``.
+    Keep the two stores synchronized so downstream nodes see the current run
+    state even when ADK executes them in fresh contexts.
+    """
+    local_state = get_state()
+    session_state = _session_state(ctx)
+    if session_state is None:
+        return local_state
+
+    if session_state:
+        merged_state = dict(session_state)
+        for key, value in local_state.items():
+            merged_state.setdefault(key, value)
+    else:
+        merged_state = dict(local_state)
+
+    set_state(merged_state)
+    session_state.clear()
+    session_state.update(merged_state)
+    return merged_state
+
+
+def _flush_state(ctx: Context) -> dict[str, Any]:
+    """Flush context-local state changes back into the ADK session state."""
+    state = get_state()
+    session_state = _session_state(ctx)
+    if session_state is not None and session_state is not state:
+        session_state.clear()
+        session_state.update(state)
+    return state
+
+
 def _instrument_node(node_name: str, node_func: Any) -> Any:
     async def _wrapped(ctx: Context, node_input: Any) -> dict[str, Any]:
-        state = get_state()
+        state = _hydrate_state(ctx)
         run_id = _run_id(state)
         workflow_version = _workflow_version(state)
         agent_role = _NODE_AGENT_ROLES.get(node_name, node_name)
@@ -231,7 +274,7 @@ def _instrument_node(node_name: str, node_func: Any) -> Any:
         try:
             result = await node_func(ctx, node_input)
         except ApprovalRequiredError as exc:
-            paused_state = get_state()
+            paused_state = _flush_state(ctx)
             paused_state["app:awaiting_approval_gate"] = exc.gate
             paused_state["app:phase"] = "awaiting_approval"
             latest_checkpoint_id = paused_state.get("app:resume_from_checkpoint_id")
@@ -248,7 +291,7 @@ def _instrument_node(node_name: str, node_func: Any) -> Any:
                 )
             raise
         except PolicyDeniedError:
-            state = get_state()
+            state = _flush_state(ctx)
             await _publish(
                 "policy.denied",
                 run_id=run_id,
@@ -260,7 +303,7 @@ def _instrument_node(node_name: str, node_func: Any) -> Any:
             )
             raise
         except Exception as exc:
-            state = get_state()
+            state = _flush_state(ctx)
             duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
             failure_context = _node_context(state, node_name)
             await _publish(
@@ -288,7 +331,7 @@ def _instrument_node(node_name: str, node_func: Any) -> Any:
             )
             raise
 
-        state = get_state()
+        state = _flush_state(ctx)
         duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
         route = getattr(ctx, "route", None)
         completion_context = _node_context(state, node_name)

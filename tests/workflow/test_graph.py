@@ -162,6 +162,34 @@ class TestWorkflowGraph:
         assert "node.started" in event_types
         assert "node.completed" in event_types
 
+    async def test_instrumented_nodes_hydrate_and_flush_session_state(self):
+        from deep_research.workflow.graph import _instrument_node, repair_draft
+        from deep_research.workflow.state import reset_state
+
+        reset_state()
+        instrumented = _instrument_node("repair_draft", repair_draft)
+        ctx = SimpleNamespace(
+            route=None,
+            session=SimpleNamespace(
+                state={
+                    "app:verification": {
+                        "blocking_findings": 1,
+                        "major_findings": 0,
+                        "findings": [{"severity": "blocking", "message": "Missing citation"}],
+                        "passed": False,
+                    },
+                    "app:repair_count": 0,
+                    "app:drafts": [{"content": "Draft"}],
+                }
+            ),
+        )
+
+        result = await instrumented(ctx, None)
+
+        assert result["remaining_blocking"] == 0
+        assert ctx.session.state["app:verification"]["passed"] is True
+        assert ctx.session.state["app:verify_result"]["blocking_findings"] == 0
+
     async def test_stop_evaluate_emits_stop_event(self):
         from deep_research.telemetry.events import get_event_bus
         from deep_research.workflow.graph import stop_evaluate
