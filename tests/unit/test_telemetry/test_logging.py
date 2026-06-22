@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from pathlib import Path
 
 import pytest
 
 from deep_research.telemetry.events import EventBus
-from deep_research.telemetry.logging import ConsoleFormatter, JsonFormatter
+from deep_research.telemetry.logging import ConsoleFormatter, JsonFormatter, read_run_logs
 
 
 class TestLoggingFormatters:
@@ -52,6 +53,27 @@ class TestLoggingFormatters:
         assert "research run started" in rendered
         assert '"run_id": "run-456"' in rendered
         assert '"status": "running"' in rendered
+
+    def test_read_run_logs_filters_by_run_id(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+        import deep_research.settings as settings_module
+
+        log_path = tmp_path / "deep_research.log"
+        log_path.write_text(
+            "\n".join(
+                [
+                    json.dumps({"run_id": "run-1", "message": "start"}),
+                    json.dumps({"run_id": "run-2", "message": "other"}),
+                    json.dumps({"run_id": "run-1", "message": "done"}),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("DEEP_RESEARCH_LOG_FILE_PATH", str(log_path))
+        monkeypatch.setattr(settings_module, "_settings", None)
+
+        records = read_run_logs("run-1")
+        assert [record["message"] for record in records] == ["start", "done"]
 
 
 @pytest.mark.asyncio

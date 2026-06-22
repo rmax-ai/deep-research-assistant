@@ -191,6 +191,13 @@ class Settings(BaseSettings):
     # Logging
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_format: Literal["json", "console"] = "json"
+    log_file_path: Path = Field(
+        default=Path("./artifacts/logs/deep_research.log"),
+        description="Path to the JSONL application log file.",
+    )
+
+    # External APIs
+    exa_api_key: str | None = None
 
 
 def get_settings() -> Settings:

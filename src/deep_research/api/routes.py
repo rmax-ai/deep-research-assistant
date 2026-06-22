@@ -35,6 +35,7 @@ from deep_research.storage.repositories import (
 from deep_research.telemetry import configure_logging
 from deep_research.telemetry.audit import record_event
 from deep_research.telemetry.events import get_event_bus
+from deep_research.telemetry.logging import read_run_logs
 from deep_research.workflow.graph import build_research_workflow
 from deep_research.workflow.recovery import load_latest_checkpoint_for_run, restore_checkpoint
 from deep_research.workflow.state import get_state, reset_state, set_state
@@ -599,6 +600,19 @@ async def get_research_events(run_id: str, since: str | None = None) -> Streamin
             unsubscribe()
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.get("/v1/research-runs/{run_id}/logs")
+async def get_research_logs(run_id: str, limit: int = 500) -> dict[str, Any]:
+    """Return file-backed log records associated with one research run."""
+    await _require_run(run_id)
+    clamped_limit = max(1, min(limit, 5000))
+    records = read_run_logs(run_id, limit=clamped_limit)
+    return {
+        "run_id": run_id,
+        "count": len(records),
+        "records": records,
+    }
 
 
 @app.get("/v1/research-runs/{run_id}/concept-map")

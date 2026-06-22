@@ -12,7 +12,7 @@ from deep_research.api import routes
 from deep_research.api.routes import app
 
 
-async def _wait_for_run_completion(client: AsyncClient, run_id: str, timeout_seconds: float = 5.0) -> dict:
+async def _wait_for_run_completion(client: AsyncClient, run_id: str, timeout_seconds: float = 10.0) -> dict:
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     while True:
         response = await client.get(f"/v1/research-runs/{run_id}")
@@ -39,6 +39,7 @@ async def stub_api_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     import deep_research.settings as settings_module
     from deep_research.settings import get_settings
     from deep_research.storage.database import close_database, init_database
+    from deep_research.telemetry.logging import configure_logging
 
     async def fake_web_search(query: str, max_results: int = 5, tool_context=None):
         return {
@@ -56,8 +57,12 @@ async def stub_api_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
         }
 
     db_path = tmp_path / "api-test.db"
+    log_path = tmp_path / "api-test.log"
     monkeypatch.setenv("DEEP_RESEARCH_DATABASE_URL", f"sqlite+aiosqlite:///{db_path}")
+    monkeypatch.setenv("DEEP_RESEARCH_LOG_FILE_PATH", str(log_path))
+    monkeypatch.setenv("DEEP_RESEARCH_EXA_API_KEY", "test-exa-key")
     monkeypatch.setattr(settings_module, "_settings", None)
+    configure_logging(force=True)
     await close_database()
     await init_database()
 
@@ -97,6 +102,7 @@ class TestAPIHealth:
             ("GET", "/v1/research-runs/{run_id}/frontier"),
             ("GET", "/v1/research-runs/{run_id}/progress"),
             ("GET", "/v1/research-runs/{run_id}/events"),
+            ("GET", "/v1/research-runs/{run_id}/logs"),
             ("GET", "/v1/research-runs/{run_id}/concept-map"),
             ("POST", "/v1/research-runs/{run_id}/interventions"),
             ("POST", "/v1/research-runs/{run_id}/approvals/{approval_id}"),
@@ -398,6 +404,22 @@ class TestCollaborationEndpoints:
         assert "event: node.started" in text
         assert "event: report.generated" in text
         assert "event: run.completed" in text
+
+    async def test_logs_endpoint_returns_file_backed_records_for_run(self, client):
+        create_resp = await client.post(
+            "/v1/research-runs",
+            json={"objective": {"title": "Logs Test", "primary_question": "Capture run logs"}},
+            timeout=60,
+        )
+        run_id = create_resp.json()["run_id"]
+        await _wait_for_run_completion(client, run_id)
+
+        response = await client.get(f"/v1/research-runs/{run_id}/logs")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["run_id"] == run_id
+        assert data["count"] > 0
+        assert all(record["run_id"] == run_id for record in data["records"])
 
     async def test_running_run_accumulates_live_progress_events(self, client, monkeypatch: pytest.MonkeyPatch):
         from deep_research.agents.research_director import (

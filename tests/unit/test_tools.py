@@ -1,11 +1,44 @@
 """Unit tests for web search and retrieval tools."""
 
+from __future__ import annotations
+
+from typing import Any
+
+import httpx
+import pytest
 
 
 class TestWebSearch:
-    async def test_search_returns_structured_results(self):
+    @pytest.fixture(autouse=True)
+    def _configure_exa(self, monkeypatch: pytest.MonkeyPatch):
+        import deep_research.settings as settings_module
+
+        monkeypatch.setenv("DEEP_RESEARCH_EXA_API_KEY", "test-exa-key")
+        monkeypatch.setattr(settings_module, "_settings", None)
+        yield
+        monkeypatch.setattr(settings_module, "_settings", None)
+
+    async def test_search_returns_structured_results(self, monkeypatch: pytest.MonkeyPatch):
         """Verify search returns correct dict structure even on error."""
         from deep_research.tools.search import web_search
+
+        async def fake_post(self, url: str, headers: dict[str, str], json: dict[str, Any]):
+            del self, url, headers, json
+            return httpx.Response(
+                200,
+                json={
+                    "requestId": "exa-1",
+                    "results": [
+                        {
+                            "title": "Python",
+                            "url": "https://example.com/python",
+                            "highlights": ["Python programming language"],
+                        }
+                    ],
+                },
+            )
+
+        monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
 
         result = await web_search("python programming", max_results=3)
         assert "query" in result
@@ -21,23 +54,49 @@ class TestWebSearch:
         assert result["query"] == ""
         assert isinstance(result["results"], list)
 
-    async def test_max_results_clamped(self):
+    async def test_max_results_clamped(self, monkeypatch: pytest.MonkeyPatch):
         """Verify max_results is clamped to valid range."""
         from deep_research.tools.search import web_search
 
-        result = await web_search("test", max_results=100)
-        # Should be clamped to MAX_RESULTS (10)
-        assert len(result["results"]) <= 10
+        captured: dict[str, Any] = {}
 
-    async def test_search_result_structure(self):
+        async def fake_post(self, url: str, headers: dict[str, str], json: dict[str, Any]):
+            del self, url, headers
+            captured.update(json)
+            return httpx.Response(200, json={"results": []})
+
+        monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+        result = await web_search("test", max_results=100)
+        assert len(result["results"]) <= 10
+        assert captured["numResults"] == 10
+
+    async def test_search_result_structure(self, monkeypatch: pytest.MonkeyPatch):
         """Verify each result has required fields."""
         from deep_research.tools.search import web_search
 
+        async def fake_post(self, url: str, headers: dict[str, str], json: dict[str, Any]):
+            del self, url, headers, json
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "title": "GitHub",
+                            "url": "https://github.com/example/repo",
+                            "summary": "A repository",
+                        }
+                    ]
+                },
+            )
+
+        monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
         result = await web_search("github.com", max_results=2)
         for item in result["results"]:
             assert "title" in item
             assert "url" in item
             assert "snippet" in item
+            assert "canonical_uri" in item
+            assert "provider" in item
 
 
 class TestURLRetrieve:
