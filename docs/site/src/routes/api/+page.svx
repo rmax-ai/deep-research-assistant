@@ -15,6 +15,138 @@ pause execution, decisions are persisted, and interrupted runs resume from durab
 http://localhost:8080/v1
 ```
 
+## End-to-End Demo
+
+The example below shows a complete curl-driven deep research run, including strict approval
+handling, progress inspection, file-backed run logs, and final export.
+
+### 1. Start the API server with Exa enabled
+
+```bash
+export DEEP_RESEARCH_EXA_API_KEY="your-exa-key"
+export DEEP_RESEARCH_APPROVALS__MODE="strict"
+```
+
+### 2. Create a deep research run
+
+```bash
+curl -X POST http://localhost:8080/v1/research-runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "objective": {
+      "title": "ADK tool governance deep research demo",
+      "primary_question": "How should a Google ADK-based research assistant govern tool usage safely in an enterprise environment?",
+      "decision_to_support": "Choose runtime guardrails for production rollout",
+      "intended_audience": ["platform engineering", "security architecture"],
+      "output_type": "technical_report",
+      "desired_depth": "deep"
+    },
+    "tenant_id": "demo",
+    "user_id": "architect-01",
+    "mode": "review_first"
+  }'
+```
+
+Example response:
+
+```json
+{
+  "run_id": "071521de",
+  "status": "queued"
+}
+```
+
+Save the `run_id` for the remaining calls:
+
+```bash
+RUN_ID=071521de
+```
+
+### 3. Poll current status
+
+```bash
+curl http://localhost:8080/v1/research-runs/$RUN_ID
+```
+
+In strict mode, the run may pause like this:
+
+```json
+{
+  "run_id": "071521de",
+  "status": "awaiting_approval"
+}
+```
+
+### 4. Inspect the pending gate
+
+```bash
+curl http://localhost:8080/v1/research-runs/$RUN_ID/approvals
+```
+
+### 5. Approve the gate and resume execution
+
+Approve Gate A:
+
+```bash
+curl -X POST http://localhost:8080/v1/research-runs/$RUN_ID/approvals/A \
+  -H "Content-Type: application/json" \
+  -d '{
+    "decision": "approved",
+    "rationale": "Scope and risk framing look correct",
+    "approver_id": "architect-01"
+  }'
+```
+
+If the run later pauses at Gate B, C, or D, use the same pattern with `/approvals/B`,
+`/approvals/C`, or `/approvals/D`.
+
+### 6. Check progress, frontier, and research graph
+
+```bash
+curl http://localhost:8080/v1/research-runs/$RUN_ID/progress
+curl http://localhost:8080/v1/research-runs/$RUN_ID/frontier
+curl http://localhost:8080/v1/research-runs/$RUN_ID/graph
+curl http://localhost:8080/v1/research-runs/$RUN_ID/concept-map
+```
+
+### 7. Retrieve file-backed logs for this run
+
+```bash
+curl http://localhost:8080/v1/research-runs/$RUN_ID/logs
+```
+
+Or fetch only the most recent records:
+
+```bash
+curl "http://localhost:8080/v1/research-runs/$RUN_ID/logs?limit=50"
+```
+
+The log records are filtered by `run_id`, so you can reconstruct what happened for one research run
+without scanning unrelated server output.
+
+### 8. Stream live workflow events
+
+```bash
+curl -N http://localhost:8080/v1/research-runs/$RUN_ID/events
+```
+
+### 9. Export the final report
+
+```bash
+curl -X POST "http://localhost:8080/v1/research-runs/$RUN_ID/exports?format=markdown"
+```
+
+### 10. Optional: submit an intervention mid-run
+
+```bash
+curl -X POST http://localhost:8080/v1/research-runs/$RUN_ID/interventions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "add_question",
+    "instruction": "What concrete guardrails should apply to tool calls that access external systems?"
+  }'
+```
+
 ## Endpoints
 
 ### Research Runs
@@ -90,6 +222,15 @@ GET /v1/research-runs/{run_id}/events
 SSE stream of workflow events: `run.started`, `perspective.created`, `claim.created`, `verification.passed`, etc.
 The event stream is operational/live UX state. The same governance-significant events are also
 written into the durable audit log internally.
+
+#### Get Run Logs
+
+```
+GET /v1/research-runs/{run_id}/logs
+```
+
+Returns file-backed JSON log records filtered by `run_id`.
+Use the optional `limit` query parameter to cap the number of returned records.
 
 ### Interventions
 
