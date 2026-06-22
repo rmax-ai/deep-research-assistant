@@ -30,7 +30,8 @@ export DEEP_RESEARCH_APPROVALS__MODE="strict"
 ### 2. Create a deep research run
 
 ```bash
-curl -X POST http://localhost:8080/v1/research-runs \
+curl \
+  -X POST "http://localhost:8080/v1/research-runs" \
   -H "Content-Type: application/json" \
   -d '{
     "objective": {
@@ -65,7 +66,8 @@ RUN_ID=071521de
 ### 3. Poll current status
 
 ```bash
-curl http://localhost:8080/v1/research-runs/$RUN_ID
+curl \
+  "http://localhost:8080/v1/research-runs/$RUN_ID"
 ```
 
 In strict mode, the run may pause like this:
@@ -80,7 +82,8 @@ In strict mode, the run may pause like this:
 ### 4. Inspect the pending gate
 
 ```bash
-curl http://localhost:8080/v1/research-runs/$RUN_ID/approvals
+curl \
+  "http://localhost:8080/v1/research-runs/$RUN_ID/approvals"
 ```
 
 ### 5. Approve the gate and resume execution
@@ -88,7 +91,8 @@ curl http://localhost:8080/v1/research-runs/$RUN_ID/approvals
 Approve Gate A:
 
 ```bash
-curl -X POST http://localhost:8080/v1/research-runs/$RUN_ID/approvals/A \
+curl \
+  -X POST "http://localhost:8080/v1/research-runs/$RUN_ID/approvals/A" \
   -H "Content-Type: application/json" \
   -d '{
     "decision": "approved",
@@ -103,22 +107,31 @@ If the run later pauses at Gate B, C, or D, use the same pattern with `/approval
 ### 6. Check progress, frontier, and research graph
 
 ```bash
-curl http://localhost:8080/v1/research-runs/$RUN_ID/progress
-curl http://localhost:8080/v1/research-runs/$RUN_ID/frontier
-curl http://localhost:8080/v1/research-runs/$RUN_ID/graph
-curl http://localhost:8080/v1/research-runs/$RUN_ID/concept-map
+curl \
+  "http://localhost:8080/v1/research-runs/$RUN_ID/progress"
+
+curl \
+  "http://localhost:8080/v1/research-runs/$RUN_ID/frontier"
+
+curl \
+  "http://localhost:8080/v1/research-runs/$RUN_ID/graph"
+
+curl \
+  "http://localhost:8080/v1/research-runs/$RUN_ID/concept-map"
 ```
 
 ### 7. Retrieve file-backed logs for this run
 
 ```bash
-curl http://localhost:8080/v1/research-runs/$RUN_ID/logs
+curl \
+  "http://localhost:8080/v1/research-runs/$RUN_ID/logs"
 ```
 
 Or fetch only the most recent records:
 
 ```bash
-curl "http://localhost:8080/v1/research-runs/$RUN_ID/logs?limit=50"
+curl \
+  "http://localhost:8080/v1/research-runs/$RUN_ID/logs?limit=50"
 ```
 
 The log records are filtered by `run_id`, so you can reconstruct what happened for one research run
@@ -127,19 +140,22 @@ without scanning unrelated server output.
 ### 8. Stream live workflow events
 
 ```bash
-curl -N http://localhost:8080/v1/research-runs/$RUN_ID/events
+curl \
+  -N "http://localhost:8080/v1/research-runs/$RUN_ID/events"
 ```
 
 ### 9. Export the final report
 
 ```bash
-curl -X POST "http://localhost:8080/v1/research-runs/$RUN_ID/exports?format=markdown"
+curl \
+  -X POST "http://localhost:8080/v1/research-runs/$RUN_ID/exports?format=markdown"
 ```
 
 ### 10. Optional: submit an intervention mid-run
 
 ```bash
-curl -X POST http://localhost:8080/v1/research-runs/$RUN_ID/interventions \
+curl \
+  -X POST "http://localhost:8080/v1/research-runs/$RUN_ID/interventions" \
   -H "Content-Type: application/json" \
   -d '{
     "type": "add_question",
