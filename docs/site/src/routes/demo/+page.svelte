@@ -12,6 +12,12 @@
     mode: "review_first",
     existingRunId: "071521de"
   };
+  const modeOptions = [
+    { value: "autonomous", label: "Autonomous" },
+    { value: "collaborative", label: "Collaborative" },
+    { value: "review_first", label: "Review first" },
+    { value: "continuous_watch", label: "Continuous watch" }
+  ];
 
   const sampleSummary = {
     runId: "071521de",
@@ -237,7 +243,11 @@ The current snapshot suggests a production research runtime should separate read
 
         <label>
           <span>Mode</span>
-          <input value={sampleForm.mode} disabled />
+          <select value={sampleForm.mode} disabled>
+            {#each modeOptions as option}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
         </label>
 
         <div class="form-actions">

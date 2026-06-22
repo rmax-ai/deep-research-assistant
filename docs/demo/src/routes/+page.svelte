@@ -40,6 +40,12 @@
     "report.generated",
     "run.completed"
   ];
+  const MODE_OPTIONS = [
+    { value: "autonomous", label: "Autonomous" },
+    { value: "collaborative", label: "Collaborative" },
+    { value: "review_first", label: "Review first" },
+    { value: "continuous_watch", label: "Continuous watch" }
+  ];
   const DEFAULT_FORM = {
     title: "ADK tool governance deep research demo",
     primaryQuestion:
@@ -980,7 +986,11 @@
 
         <label>
           <span>Mode</span>
-          <input bind:value={form.mode} name="mode" required />
+          <select bind:value={form.mode} name="mode" required>
+            {#each MODE_OPTIONS as option}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
         </label>
 
         <div class="form-actions">
