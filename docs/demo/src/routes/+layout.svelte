@@ -50,7 +50,7 @@
     --accent-soft: #efb45b;
     --teal: #2d807f;
     --shadow: 0 22px 52px rgba(33, 46, 60, 0.08);
-    --shell-width: 1040px;
+    --shell-width: 1120px;
     --shell-gutter: 1rem;
   }
 

@@ -116,9 +116,9 @@
     --page-bg-strong: #efe3d2;
     --surface: rgba(255, 251, 244, 0.78);
     --surface-strong: rgba(255, 255, 255, 0.84);
-    --shell-width: 1040px;
-    --doc-width: 760px;
+    --shell-width: 1120px;
     --shell-gutter: 1rem;
+    --doc-width: 800px;
     --text-strong: #16324f;
     --text-body: #4f6073;
     --text-soft: #7a695e;
