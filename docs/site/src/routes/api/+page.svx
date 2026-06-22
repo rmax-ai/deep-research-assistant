@@ -6,6 +6,8 @@ description: REST API surface for the Deep Research Assistant
 # API Reference
 
 The Deep Research Assistant exposes a REST API (FastAPI) for creating, inspecting, and managing research runs.
+The current implementation is strict about governance for API-driven runs: required approval gates
+pause execution, decisions are persisted, and interrupted runs resume from durable checkpoints.
 
 ## Base URL
 
@@ -30,6 +32,8 @@ POST /v1/research-runs
     "primary_question": "Which architectural controls are required for a secure enterprise agent runtime?",
     "decision_to_support": "Define platform architecture"
   },
+  "tenant_id": "acme",
+  "user_id": "architect-01",
   "mode": "review_first",
   "constraints": {
     "minimum_primary_source_ratio": 0.6,
@@ -45,7 +49,9 @@ GET /v1/research-runs/{run_id}
 ```
 
 Returns the full research run aggregate with all nested entities.
-Currently returns summary status, objective/scope, counts, and a report preview.
+Current implementation returns summary status, objective/scope, counts, and a report preview,
+plus runtime statuses such as `queued`, `running`, `awaiting_approval`, `interrupted`, `completed`,
+and `failed`.
 
 #### Get Research Graph
 
@@ -72,6 +78,8 @@ GET /v1/research-runs/{run_id}/progress
 ```
 
 Returns current phase, budget consumption, and completion estimates.
+When a required gate pauses execution, progress reflects the `awaiting_approval` phase until a
+decision is submitted.
 
 #### Stream Events
 
@@ -80,6 +88,8 @@ GET /v1/research-runs/{run_id}/events
 ```
 
 SSE stream of workflow events: `run.started`, `perspective.created`, `claim.created`, `verification.passed`, etc.
+The event stream is operational/live UX state. The same governance-significant events are also
+written into the durable audit log internally.
 
 ### Interventions
 
@@ -131,6 +141,12 @@ Approval gates:
 - **Gate C** — Evidence & Outline: claims, contradictions, proposed structure
 - **Gate D** — Publication: required for external distribution
 
+Behavior notes:
+- API-created runs enforce approvals by default.
+- In strict mode, a required gate moves the run into `awaiting_approval`.
+- Submitting an approval decision persists the decision and requeues the run from the latest durable checkpoint.
+- A development `auto_approve` mode exists behind configuration for local/test workflows.
+
 ### Export
 
 ```
@@ -152,7 +168,7 @@ Most endpoints currently return plain JSON objects rather than a shared response
 ```json
 {
   "run_id": "run-001",
-  "status": "completed"
+  "status": "awaiting_approval"
 }
 ```
 
@@ -165,6 +181,7 @@ The SSE event stream emits typed events at each workflow stage:
 | `run.started` | `{run_id, objective_title}` |
 | `scope.proposed` | `{scope, risk_level}` |
 | `approval.requested` | `{gate, display_data}` |
+| `approval.decided` | `{approval_id, status, rationale}` |
 | `perspective.created` | `{perspective_count}` |
 | `question.created` | `{question_count}` |
 | `query.executed` | `{query, results_count}` |
@@ -177,4 +194,7 @@ The SSE event stream emits typed events at each workflow stage:
 | `section.generated` | `{section_title}` |
 | `verification.passed` | `{findings}` |
 | `verification.failed` | `{blocking_findings}` |
+| `checkpoint.created` | `{checkpoint_id, node}` |
+| `checkpoint.restored` | `{checkpoint_id, node_name}` |
+| `run.resumed` | `{checkpoint_id}` |
 | `run.completed` | `{report_length}` |

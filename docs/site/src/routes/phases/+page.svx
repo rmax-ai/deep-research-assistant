@@ -5,19 +5,21 @@ description: Build phases and roadmap for the Deep Research Assistant
 
 # Implementation Phases
 
-All 7 phases are complete — 46 stories across 7 epics.
+The current shipped runtime fully covers phases 0–5 and the recovery portion that phase 6
+depends on. Continuous watch mode primitives exist in the codebase, but the website now reflects
+only the features that are actually wired into the runtime and API surface today.
 
 ## Phase Summary
 
-| Phase | Stories | Lines Changed | Key Deliverables |
-|-------|---------|---------------|------------------|
-| 0: Architecture Spike | 4 | — | ADK 2.0 workflow skeleton, 20 nodes, schemas, end-to-end demo |
-| 1: Evidence-First MVP | 8 | — | 7 agents, REST API, citations, claim-evidence traceability |
-| 2: STORM-Grade Iterative | 6 | +1,406/-675 | Moderator, scheduler, stopping conditions, info-gain metrics |
-| 3: Co-STORM Collaboration | 8 | +1,197/-144 | Events, approvals, interventions, concept map, knowledge organizer |
-| 4: Epistemic Reliability | 6 | +1,167/-35 | Counter-evidence, contradictions, confidence, verification |
-| 5: Enterprise Governance | 8 | +336/-5 | Identity, policy engine, audit log, source classification |
-| 6: Continuous Research | 6 | +389 | Watch mode, skill registry, knowledge publishing |
+| Phase | Status | Key Deliverables |
+|-------|--------|------------------|
+| 0: Architecture Spike | Complete | ADK workflow skeleton, schemas, event model, run persistence |
+| 1: Evidence-First MVP | Complete | Core agents, REST API, citations, claim-evidence traceability |
+| 2: STORM-Grade Iterative | Complete | Moderator, scheduler, stopping conditions, info-gain metrics |
+| 3: Co-STORM Collaboration | Complete | Events, approvals, interventions, concept map, knowledge organizer |
+| 4: Epistemic Reliability | Complete | Counter-evidence, contradictions, confidence, verification |
+| 5: Enterprise Governance | Complete | Identity, policy engine, durable audit, strict approvals |
+| 6: Continuous Research | Partial | Watch-mode primitives and reusable patterns exist, but are not yet exposed as a completed product surface |
 
 ## Phase 0: Architecture Spike
 
@@ -28,6 +30,7 @@ All 7 phases are complete — 46 stories across 7 epics.
 - Session persistence
 - Event streaming infrastructure
 - Web search tool integration
+- Durable checkpoint/recovery is now implemented and wired into the persisted runtime
 
 ## Phase 1: Evidence-First MVP
 
@@ -62,6 +65,7 @@ All 7 phases are complete — 46 stories across 7 epics.
 - Approval gates A/B/C/D with configurable triggers
 - Knowledge Organizer Agent + concept map projection
 - Mid-run scope changes
+- Strict API approval pausing with persisted decisions and resume after approval
 
 ## Phase 4: Epistemic Reliability
 
@@ -79,21 +83,20 @@ All 7 phases are complete — 46 stories across 7 epics.
 
 **Exit criterion:** Security, authorization, and audit release gates pass.
 
-- Identity engine: principal context propagation through all nodes
-- Policy engine: role-to-tool allowlists, stage-based tool reduction
+- Identity engine: principal context propagation through persisted runs and node execution
+- Policy engine: role-to-tool allowlists, stage-based tool reduction, durable decision linkage
 - Real source policy: deduplication, classification, domain filtering
 - Immutable audit log with chain verification
+- DB-backed workflow checkpoints, node execution records, and resumable runtime state
 - Prompt injection defenses
 
 ## Phase 6: Continuous Research and Reusable SOPs
 
 **Exit criterion:** A saved research workflow can update prior findings without rebuilding blindly.
 
-- Continuous watch mode with delta detection
-- Source content change detection + claim invalidation cascade
-- Research Skill Registry with progressive disclosure
-- 5 domain templates: architecture analysis, security, standards, vendor validation, executive briefs
-- Knowledge-layer publishing: validated claims → long-term memory
+- The repository includes a `workflow.watch` module and related primitives for delta detection.
+- Those pieces are not yet wired into the public API or documented as a completed product capability.
+- The website therefore treats this phase as partial rather than claiming an end-to-end continuous research surface today.
 
 ## Dependency Graph
 

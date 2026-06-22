@@ -47,6 +47,8 @@
     --page-bg-strong: #efe3d2;
     --surface: rgba(255, 251, 244, 0.78);
     --surface-strong: rgba(255, 255, 255, 0.84);
+    --shell-width: 1040px;
+    --doc-width: 760px;
     --text-strong: #16324f;
     --text-body: #4f6073;
     --text-soft: #7a695e;
@@ -152,7 +154,9 @@
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    padding: 1rem 1.4rem;
+    width: min(var(--shell-width), calc(100vw - 2rem));
+    margin: 0 auto;
+    padding: 1rem 0;
     border-bottom: 1px solid var(--line);
     background: rgba(250, 245, 236, 0.72);
     backdrop-filter: blur(12px);

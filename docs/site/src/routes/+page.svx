@@ -29,7 +29,8 @@ description: Governed multi-agent research workflow for evidence-backed analysis
       <a href={base + "/architecture/"} class="btn secondary">Read Architecture</a>
     </div>
     <div class="hero-note">
-      Built on Google ADK 2.0 with deterministic workflow nodes and bounded Gemini-backed agents.
+      Built on Google ADK 2.0 with deterministic workflow nodes, bounded Gemini-backed agents,
+      durable checkpoints, append-only audit events, and strict approval pauses for API-driven runs.
     </div>
   </div>
 
@@ -59,11 +60,11 @@ description: Governed multi-agent research workflow for evidence-backed analysis
       </div>
       <div>
         <span class="mini-label">Approvals</span>
-        <p>Scope, plan, outline, and publication gates.</p>
+        <p>Strict-by-default gates with opt-in dev auto-approve.</p>
       </div>
       <div>
         <span class="mini-label">Output</span>
-        <p>Report draft plus progress, graph, events, and exports.</p>
+        <p>Report draft plus progress, graph, events, exports, and resumable runtime state.</p>
       </div>
     </div>
   </div>
@@ -111,8 +112,17 @@ description: Governed multi-agent research workflow for evidence-backed analysis
     <article class="feature">
       <h3>Approval-aware operation</h3>
       <p>
-        Review gates are built into the graph, not bolted on later. Runs can pause at semantic
-        boundaries before scope expansion, outline approval, or publication.
+        Review gates are built into the graph, not bolted on later. API-driven runs can enter
+        <code>awaiting_approval</code> and resume only after a persisted approval decision.
+      </p>
+    </article>
+
+    <article class="feature">
+      <h3>Durable execution and recovery</h3>
+      <p>
+        Workflow checkpoints, node execution records, approval decisions, and audit events are
+        stored durably so interrupted runs can recover from the latest checkpoint instead of
+        replaying blindly.
       </p>
     </article>
 
@@ -127,8 +137,8 @@ description: Governed multi-agent research workflow for evidence-backed analysis
     <article class="feature">
       <h3>Deterministic validation</h3>
       <p>
-        Route contracts, workflow behavior, and quality gates run in normal CI. Live Gemini checks
-        stay opt-in and bounded so cost and flake do not leak into every push.
+        Route contracts, workflow behavior, governance persistence, and quality gates run in CI.
+        Live Gemini checks stay opt-in and bounded so cost and flake do not leak into every push.
       </p>
     </article>
 
@@ -136,7 +146,7 @@ description: Governed multi-agent research workflow for evidence-backed analysis
       <h3>Enterprise control plane</h3>
       <p>
         Identity propagation, policy checks, source filtering, budget accounting, telemetry, and
-        append-only audit events are all part of the system design.
+        chain-verified append-only audit events are part of the shipped runtime, not just the spec.
       </p>
     </article>
   </div>
@@ -177,6 +187,7 @@ description: Governed multi-agent research workflow for evidence-backed analysis
     <div class="api-row"><strong>GET</strong><code>/events</code> <code>/concept-map</code></div>
     <div class="api-row"><strong>POST</strong><code>/interventions</code> <code>/exports</code></div>
     <div class="api-row"><strong>GET/POST</strong><code>/approvals</code></div>
+    <div class="api-row"><strong>Status</strong><code>queued</code> <code>running</code> <code>awaiting_approval</code> <code>interrupted</code></div>
   </div>
 </section>
 
@@ -194,6 +205,7 @@ description: Governed multi-agent research workflow for evidence-backed analysis
         <li>Evidence stays immutable</li>
         <li>Workflow events are inspectable</li>
         <li>Approvals are modeled in the graph</li>
+        <li>Checkpoints and audit events are durable</li>
         <li>Validation is split between deterministic and live tiers</li>
       </ul>
     </div>
@@ -229,7 +241,7 @@ description: Governed multi-agent research workflow for evidence-backed analysis
   .workflow-section,
   .split-panel,
   .cta-strip {
-    width: min(1180px, calc(100vw - 2rem));
+    width: min(var(--shell-width, 1040px), calc(100vw - 2rem));
     margin: 0 auto;
   }
 
@@ -603,7 +615,7 @@ description: Governed multi-agent research workflow for evidence-backed analysis
     .workflow-section,
     .split-panel,
     .cta-strip {
-      width: min(100vw - 1.2rem, 1180px);
+      width: min(100vw - 1.2rem, var(--shell-width, 1040px));
     }
 
     .step {

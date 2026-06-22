@@ -13,14 +13,15 @@ Unlike monolithic chatbot approaches, the system's fundamental unit of quality i
 
 ## Workflow Topology
 
-The workflow is a 30-node ADK 2.0 `Workflow` graph with branching edges for approval gates, iterative loops, and repair cycles.
+The shipped runtime is a 27-node ADK 2.0 `Workflow` graph with branching edges for approval
+gates, iterative loops, repair cycles, and resumable execution.
 
 ```
 START
   → scope_classify (Research Director)
   → perspective_generate (Perspective Planner)
   → question_graph_build (Question Architect)
-  → approve_plan [Gate A] ←→ scope_classify (reject)
+  → approve_plan [Gates A/B] ←→ scope_classify (reject)
   → scheduler_select (Frontier Scheduler)
   → search_plan_create (Query Planner)
   → source_retrieve (Web Search)
@@ -32,6 +33,7 @@ START
   → coverage_calculate (Info-Gain Metrics)
   → moderator (Research Moderator)
   → interventions_apply (User Interventions)
+  → scope_change_apply (Queued scope changes)
   → stop_evaluate ←→ scheduler_select (continue loop)
   → outline_build (Outline Architect)
   → approve_outline [Gate C] ←→ outline_build (reject)
@@ -63,21 +65,22 @@ START
 | Verification Agent | Citation entailment, cross-section consistency | gemini-3-flash-preview |
 | Executive Synthesizer | Concise executive synthesis | gemini-3-flash-preview |
 
-### Deterministic Nodes (16 FunctionNodes)
+### Deterministic Nodes and Runtime Services
 
-| Node | Responsibility |
-|------|---------------|
+| Runtime element | Responsibility |
+|-----------------|---------------|
 | scheduler_select | Priority-based frontier selection |
 | source_policy_apply | Deduplication, classification, domain filtering |
 | coverage_calculate | Information-gain metrics (IG_t formula) |
 | stop_evaluate | Multi-condition stopping (budget, coverage, IG, deadlines) |
-| contradictions_search | Claim pair comparison, resolution tracking |
-| confidence_score | Authority × independence × freshness × corroboration |
-| cluster_sources | Publisher/domain independence clustering |
+| scope_change_apply | Mid-run topic/perspective modifications |
 | verify_draft_citations | Keyword-overlap entailment heuristics |
 | repair_loop | Max 2 repair passes for blocking findings |
-| budget_track | Perspective-level budget enforcement |
-| scope_change_apply | Mid-run topic/perspective modifications |
+| cluster_sources | Publisher/domain independence clustering |
+| workflow checkpoints | Durable node-boundary snapshots for resume |
+| node execution log | Idempotency and replay skipping metadata |
+| approval decision store | First-class gate state and decisions |
+| audit event store | Append-only, chain-verified governance events |
 
 ## Data Model
 
@@ -101,14 +104,35 @@ ResearchRun
 └── ResearchMetrics (coverage, confidence, cost, latency)
 ```
 
+### Durable Runtime Records
+
+The runtime now persists more than the top-level run row:
+
+- `research_runs` stores the latest materialized state plus runtime fields such as
+  `current_node`, `awaiting_approval_gate`, `resume_from_checkpoint_id`, `retry_count`, and
+  `workflow_version`.
+- `workflow_checkpoints` stores checkpointed workflow state after key node boundaries.
+- `workflow_node_executions` stores idempotency keys, checkpoint linkage, and cached results.
+- `approval_decisions` stores gate state as first-class durable records.
+- `audit_events` stores append-only, chain-verified governance events.
+
 ## Trust Boundaries
 
 1. **User → API**: OAuth / API key authentication
-2. **API → Workflow**: Run-scoped identity propagation
+2. **API → Workflow**: Run-scoped identity propagation with explicit `tenant_id`, `user_id`, and delegated scopes
 3. **Agent → Tools**: Policy engine evaluates `{principal, action, stage, risk}` → `{allow, deny, confirm}`
 4. **Evidence → Claims**: Data/instruction channel separation (prompt injection defense)
 5. **Claims → Report**: Citation entailment verification before rendering
 6. **Report → Publication**: Approval Gate D for external distribution
+
+## Current Governance Behavior
+
+- API-created runs initialize a real principal and enable strict approval enforcement.
+- Required gates pause execution in `awaiting_approval` until `/approvals/{approval_id}` is called.
+- Audit and checkpoint writes are durable for persisted runs and intentionally skipped for pure
+  in-memory workflow tests.
+- Resume behavior restores the latest checkpoint and continues from the checkpointed node boundary
+  instead of replaying the full run from scratch.
 
 ## Model Routing
 

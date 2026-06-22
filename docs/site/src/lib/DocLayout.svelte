@@ -8,7 +8,7 @@
 
 <style>
   .doc {
-    max-width: 820px;
+    max-width: var(--doc-width, 760px);
     margin: 0 auto;
     padding: 2rem 1.5rem 4rem;
   }
