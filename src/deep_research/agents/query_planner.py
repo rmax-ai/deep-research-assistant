@@ -11,7 +11,7 @@ from typing import Any
 
 from deep_research.agents import (
     generate_structured,
-    get_model_for_tier,
+    get_model_for_stage,
     is_llm_available,
     parse_json_response,
 )
@@ -83,7 +83,7 @@ Generate search queries for this question."""
     try:
         response = await generate_structured(
             prompt=prompt,
-            model=model or get_model_for_tier("fast"),
+            model=model or get_model_for_stage("search_plan_create"),
             system_instruction=QUERY_PLANNER_INSTRUCTION,
             temperature=0.2,
         )

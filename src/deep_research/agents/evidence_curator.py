@@ -11,7 +11,7 @@ from typing import Any
 
 from deep_research.agents import (
     generate_structured,
-    get_model_for_tier,
+    get_model_for_stage,
     is_llm_available,
     parse_json_response,
 )
@@ -96,7 +96,7 @@ async def evidence_curator(
     try:
         response = await generate_structured(
             prompt=prompt,
-            model=model or get_model_for_tier("reasoning"),
+            model=model or get_model_for_stage("evidence_extract"),
             system_instruction=EVIDENCE_CURATOR_INSTRUCTION,
             temperature=0.1,
             max_output_tokens=4096,

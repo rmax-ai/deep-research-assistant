@@ -1237,7 +1237,7 @@ async def outline_not_required(ctx: Context, node_input: Any) -> dict[str, Any]:
 
 
 async def verify_draft(ctx: Context, node_input: Any) -> dict[str, Any]:
-    """Real verification: citation entailment + semantic check via Verifier agent."""
+    """Run independent verification over generated drafts."""
     state = get_state()
     drafts = state.get("app:drafts", [])
     outline = state.get("app:outline", {})
@@ -1259,24 +1259,8 @@ async def verify_draft(ctx: Context, node_input: Any) -> dict[str, Any]:
         ctx.route = 0
         return result
 
-    # Heuristic citation entailment check (always runs)
-    from deep_research.nodes.verification import verify_draft_citations
-    citation_result = verify_draft_citations(drafts, claims, evidence)
-
-    # LLM semantic verification
     from deep_research.agents.verifier import verifier
-    semantic_result = await verifier(drafts, claims, evidence)
-
-    # Merge findings
-    merged_findings = citation_result.get("findings", []) + semantic_result.get("findings", [])
-    blocking = citation_result.get("blocking_findings", 0) + semantic_result.get("blocking_findings", 0)
-
-    result = {
-        "findings": merged_findings,
-        "blocking_findings": blocking,
-        "major_findings": citation_result.get("major_findings", 0) + semantic_result.get("major_findings", 0),
-        "passed": blocking == 0,
-    }
+    result = await verifier(drafts, claims, evidence)
     state["app:verify_result"] = result
     state["app:verification"] = result
     ctx.route = 1 if result["passed"] else 0

@@ -8,7 +8,7 @@ import os
 
 import pytest
 
-LLM_AVAILABLE = bool(os.environ.get("GOOGLE_API_KEY"))
+LLM_AVAILABLE = bool(os.environ.get("DEEP_RESEARCH_GOOGLE_API_KEY"))
 LIVE_MODEL = os.environ.get("LIVE_VALIDATION_MODEL", "gemini-3-flash-preview")
 
 
@@ -16,7 +16,7 @@ LIVE_MODEL = os.environ.get("LIVE_VALIDATION_MODEL", "gemini-3-flash-preview")
 class TestCitationEntailment:
     @pytest.mark.live_llm
     @pytest.mark.live_agent_smoke
-    @pytest.mark.skipif(not LLM_AVAILABLE, reason="GOOGLE_API_KEY not set")
+    @pytest.mark.skipif(not LLM_AVAILABLE, reason="DEEP_RESEARCH_GOOGLE_API_KEY not set")
     async def test_full_pipeline_produces_claims_with_evidence_llm(self):
         from deep_research.agents import generate_structured
         from deep_research.agents.claim_builder import claim_builder
@@ -58,7 +58,7 @@ class TestCitationEntailment:
 
     @pytest.mark.live_llm
     @pytest.mark.live_bounded_workflow
-    @pytest.mark.skipif(not LLM_AVAILABLE, reason="GOOGLE_API_KEY not set")
+    @pytest.mark.skipif(not LLM_AVAILABLE, reason="DEEP_RESEARCH_GOOGLE_API_KEY not set")
     async def test_bounded_live_workflow_smoke(self, monkeypatch: pytest.MonkeyPatch):
         from google.adk.runners import InMemoryRunner
         from google.genai.types import Content, Part

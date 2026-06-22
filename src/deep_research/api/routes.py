@@ -390,17 +390,69 @@ def _resolve_citation_sources(
     return resolved
 
 
+def _resolve_claim_sources(
+    claim_id: str,
+    *,
+    state: dict[str, Any],
+    source_lookup: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Resolve one stable claim citation into concrete sources."""
+    claims = state.get("app:claims", [])
+    evidence = state.get("app:evidence", [])
+    resolved: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add_source(candidate: dict[str, Any] | None) -> None:
+        if not candidate:
+            return
+        identity = _normalize_source_identity(candidate)
+        if not identity or identity in seen:
+            return
+        seen.add(identity)
+        resolved.append(candidate)
+
+    claim = next(
+        (
+            item
+            for item in claims
+            if isinstance(item, dict) and str(item.get("claim_id", "")).strip() == claim_id
+        ),
+        None,
+    )
+    if claim is None:
+        return resolved
+
+    for evidence_ref in claim.get("evidence_ids", []):
+        evidence_item: dict[str, Any] | None = None
+        if isinstance(evidence_ref, int) and 0 <= evidence_ref < len(evidence):
+            raw_evidence = evidence[evidence_ref]
+            evidence_item = raw_evidence if isinstance(raw_evidence, dict) else None
+        else:
+            evidence_key = str(evidence_ref or "").strip()
+            evidence_item = next(
+                (
+                    item
+                    for item in evidence
+                    if isinstance(item, dict) and str(item.get("evidence_id", "")).strip() == evidence_key
+                ),
+                None,
+            )
+
+        if evidence_item is not None:
+            add_source(_source_from_reference(str(evidence_item.get("source_id", "")), source_lookup))
+
+    return resolved
+
+
 def _rewrite_report_references(report: str, state: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
     """Rewrite bracket citations to a compact export-local numbering scheme."""
     source_lookup = _build_source_lookup(state)
     ordered_sources: list[dict[str, Any]] = []
     source_numbers: dict[str, int] = {}
 
-    def replacement(match: re.Match[str]) -> str:
-        citation_number = int(match.group(1))
-        resolved_sources = _resolve_citation_sources(citation_number, state=state, source_lookup=source_lookup)
+    def _format_resolved_sources(resolved_sources: list[dict[str, Any]]) -> str:
         if not resolved_sources:
-            return match.group(0)
+            return "[citation unresolved]"
 
         assigned_numbers: list[int] = []
         for source in resolved_sources:
@@ -415,11 +467,22 @@ def _rewrite_report_references(report: str, state: dict[str, Any]) -> tuple[str,
             assigned_numbers.append(number)
 
         if not assigned_numbers:
-            return match.group(0)
+            return "[citation unresolved]"
 
         return "[" + ", ".join(str(number) for number in assigned_numbers) + "]"
 
-    rewritten_report = re.sub(r"\[(\d+)\]", replacement, report)
+    def claim_replacement(match: re.Match[str]) -> str:
+        claim_id = match.group(1).strip()
+        resolved_sources = _resolve_claim_sources(claim_id, state=state, source_lookup=source_lookup)
+        return _format_resolved_sources(resolved_sources)
+
+    def numeric_replacement(match: re.Match[str]) -> str:
+        citation_number = int(match.group(1))
+        resolved_sources = _resolve_citation_sources(citation_number, state=state, source_lookup=source_lookup)
+        return _format_resolved_sources(resolved_sources)
+
+    rewritten_report = re.sub(r"\[(\d+)\]", numeric_replacement, report)
+    rewritten_report = re.sub(r"\[claim:([^\]]+)\]", claim_replacement, rewritten_report)
     return rewritten_report, ordered_sources
 
 

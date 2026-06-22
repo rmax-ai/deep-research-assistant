@@ -11,7 +11,7 @@ from typing import Any
 
 from deep_research.agents import (
     generate_structured,
-    get_model_for_tier,
+    get_model_for_stage,
     is_llm_available,
     parse_json_response,
 )
@@ -126,7 +126,7 @@ Generate research questions for these perspectives."""
     try:
         response = await generate_structured(
             prompt=prompt,
-            model=model or get_model_for_tier("fast"),
+            model=model or get_model_for_stage("question_graph_build"),
             system_instruction=QUESTION_ARCHITECT_INSTRUCTION,
             temperature=0.2,
         )
@@ -232,7 +232,7 @@ async def generate_follow_ups(
     try:
         response = await generate_structured(
             prompt=prompt,
-            model=model or get_model_for_tier("fast"),
+            model=model or get_model_for_stage("follow_up_question_generate"),
             system_instruction=FOLLOW_UP_INSTRUCTION,
             temperature=0.2,
         )

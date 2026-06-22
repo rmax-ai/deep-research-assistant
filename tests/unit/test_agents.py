@@ -166,6 +166,31 @@ class TestAgentInit:
         assert get_model_for_tier("reasoning") == "gemini-reasoning-test"
         assert get_model_for_tier("verification") == "gemini-verification-test"
 
+    def test_get_model_for_stage_routes_to_expected_tiers(self, monkeypatch: pytest.MonkeyPatch):
+        from deep_research.agents import get_model_for_stage
+        from deep_research.settings import get_settings
+
+        settings = get_settings()
+        monkeypatch.setattr(settings.models.fast, "model", "gemini-fast-test")
+        monkeypatch.setattr(settings.models.reasoning, "model", "gemini-pro-test")
+        monkeypatch.setattr(settings.models.verification, "model", "gemini-verifier-test")
+
+        assert get_model_for_stage("perspective_generate") == "gemini-fast-test"
+        assert get_model_for_stage("question_graph_build") == "gemini-fast-test"
+        assert get_model_for_stage("claims_construct") == "gemini-pro-test"
+        assert get_model_for_stage("contradictions_search") == "gemini-pro-test"
+        assert get_model_for_stage("draft_generate") == "gemini-pro-test"
+        assert get_model_for_stage("verify_draft") == "gemini-verifier-test"
+        assert get_model_for_stage("verifier") == "gemini-verifier-test"
+
+    def test_default_model_policy_uses_flash_and_pro(self):
+        from deep_research.settings import ModelRoutingConfig
+
+        models = ModelRoutingConfig()
+        assert models.fast.model == "gemini-3-flash-preview"
+        assert models.reasoning.model == "gemini-3-pro"
+        assert models.verification.model == "gemini-3-pro"
+
     def test_parse_json_code_fenced(self):
         from deep_research.agents import parse_json_response
 
@@ -192,7 +217,9 @@ class TestAgentInit:
                     ],
                 )
 
-        monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        from deep_research.settings import get_settings
+
+        monkeypatch.setattr(get_settings(), "google_api_key", "test-key")
         monkeypatch.setattr("deep_research.agents.get_client", lambda: SimpleNamespace(models=FakeModels()))
 
         result = await generate_structured("Say OK", timeout_seconds=1)
@@ -208,7 +235,9 @@ class TestAgentInit:
                 time.sleep(0.2)
                 return SimpleNamespace(text="late")
 
-        monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        from deep_research.settings import get_settings
+
+        monkeypatch.setattr(get_settings(), "google_api_key", "test-key")
         monkeypatch.setattr("deep_research.agents.get_client", lambda: SimpleNamespace(models=SlowModels()))
 
         with pytest.raises(RuntimeError, match="timed out"):
@@ -228,7 +257,9 @@ class TestAgentInit:
                     return SimpleNamespace(text='```json\n{"questions": [\n  {"text": "A"')
                 return SimpleNamespace(text='{"questions": [{"text": "A"}]}')
 
-        monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        from deep_research.settings import get_settings
+
+        monkeypatch.setattr(get_settings(), "google_api_key", "test-key")
         monkeypatch.setattr("deep_research.agents.get_client", lambda: SimpleNamespace(models=RetryModels()))
 
         result = await generate_structured("Generate questions", max_output_tokens=128, timeout_seconds=1)

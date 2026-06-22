@@ -8,7 +8,7 @@ from typing import Any
 
 from deep_research.agents import (
     generate_structured,
-    get_model_for_tier,
+    get_model_for_stage,
     is_llm_available,
     parse_json_response,
 )
@@ -133,7 +133,7 @@ async def moderator(
     try:
         response = await generate_structured(
             prompt=prompt,
-            model=model or get_model_for_tier("fast"),
+            model=model or get_model_for_stage("moderator"),
             system_instruction=MODERATOR_INSTRUCTION,
             temperature=0.1,
         )

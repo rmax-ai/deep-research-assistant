@@ -126,7 +126,7 @@ The live suite validates real Gemini-backed agent behavior and a bounded workflo
 
 GitHub Actions mirrors this split:
 - `CI` runs deterministic checks on pushes and pull requests
-- `Live Validation` is a separate manual workflow (`workflow_dispatch`) that requires `GOOGLE_API_KEY`
+- `Live Validation` is a separate manual workflow (`workflow_dispatch`) that requires `DEEP_RESEARCH_GOOGLE_API_KEY`
 
 ## License
 

@@ -5,7 +5,25 @@ Deterministic node — checks whether cited evidence actually supports claims.
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+_CLAIM_REFERENCE_PATTERN = re.compile(r"\[claim:([^\]]+)\]")
+_LEGACY_NUMERIC_CITATION_PATTERN = re.compile(r"\[(\d+)\]")
+
+
+def _claim_references_for_draft(draft: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Return claim references and legacy numeric citations found in one draft."""
+    content = str(draft.get("content", "") or "")
+    referenced_claim_ids = [match.strip() for match in _CLAIM_REFERENCE_PATTERN.findall(content) if match.strip()]
+    legacy_citations = [match.strip() for match in _LEGACY_NUMERIC_CITATION_PATTERN.findall(content) if match.strip()]
+
+    for claim_id in draft.get("cited_claim_ids", []):
+        normalized = str(claim_id or "").strip()
+        if normalized and normalized not in referenced_claim_ids:
+            referenced_claim_ids.append(normalized)
+
+    return referenced_claim_ids, legacy_citations
 
 
 def check_entailment(claim_text: str, evidence_excerpt: str) -> tuple[bool, float]:
@@ -72,7 +90,31 @@ def verify_draft_citations(
     findings: list[dict[str, Any]] = []
 
     for draft in drafts:
-        cited_claim_ids = draft.get("cited_claim_ids", [])
+        cited_claim_ids, legacy_citations = _claim_references_for_draft(draft)
+        section = str(draft.get("section_title") or draft.get("title") or "unknown")
+
+        if legacy_citations:
+            findings.append({
+                "finding_id": f"find-{len(findings):03d}",
+                "type": "legacy_numeric_citation",
+                "severity": "blocking",
+                "section": section,
+                "message": (
+                    "Draft uses unresolved numeric citations. "
+                    "Use stable [claim:<claim_id>] references instead."
+                ),
+            })
+            continue
+
+        if str(draft.get("content", "")).strip() and not cited_claim_ids:
+            findings.append({
+                "finding_id": f"find-{len(findings):03d}",
+                "type": "missing_citation_reference",
+                "severity": "blocking",
+                "section": section,
+                "message": "Draft content includes claims but no stable claim citations were recorded.",
+            })
+            continue
 
         for cid in cited_claim_ids:
             claim = claims_by_id.get(cid)
@@ -82,6 +124,7 @@ def verify_draft_citations(
                     "type": "missing_claim",
                     "claim_id": cid,
                     "severity": "blocking",
+                    "section": section,
                     "message": f"Cited claim {cid} not found in claim registry",
                 })
                 continue
@@ -94,6 +137,7 @@ def verify_draft_citations(
                     "type": "unsupported_claim",
                     "claim_id": cid,
                     "severity": "blocking",
+                    "section": section,
                     "message": f"Claim {cid} has no linked evidence",
                 })
                 continue
@@ -120,6 +164,7 @@ def verify_draft_citations(
                     "type": "citation_entailment_failure",
                     "claim_id": cid,
                     "severity": severity,
+                    "section": section,
                     "message": f"No evidence fragment entails claim {cid}",
                 })
 

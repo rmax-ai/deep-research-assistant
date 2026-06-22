@@ -34,9 +34,15 @@ class ModelRoutingConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="DEEP_RESEARCH_MODELS_")
 
-    fast: ModelConfig = Field(default_factory=ModelConfig)
-    reasoning: ModelConfig = Field(default_factory=ModelConfig)
-    verification: ModelConfig = Field(default_factory=ModelConfig)
+    fast: ModelConfig = Field(
+        default_factory=lambda: ModelConfig(model="gemini-3-flash-preview")
+    )
+    reasoning: ModelConfig = Field(
+        default_factory=lambda: ModelConfig(model="gemini-3-pro")
+    )
+    verification: ModelConfig = Field(
+        default_factory=lambda: ModelConfig(model="gemini-3-pro")
+    )
 
 
 class BudgetConfig(BaseSettings):
@@ -210,6 +216,7 @@ class Settings(BaseSettings):
     )
 
     # External APIs
+    google_api_key: str | None = None
     exa_api_key: str | None = None
 
 

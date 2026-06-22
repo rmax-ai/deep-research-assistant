@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from typing import Any, Literal
 
 from deep_research.settings import get_settings
@@ -18,6 +17,59 @@ logger = logging.getLogger(__name__)
 
 _client: Any = None
 
+ModelTier = Literal["fast", "reasoning", "verification"]
+ModelStage = Literal[
+    "perspective_generate",
+    "perspective_planner",
+    "question_graph_build",
+    "question_architect",
+    "search_plan_create",
+    "query_planner",
+    "moderator",
+    "follow_up_question_generate",
+    "scope_classify",
+    "research_director",
+    "evidence_extract",
+    "evidence_curator",
+    "claims_construct",
+    "claim_builder",
+    "contradictions_search",
+    "counter_evidence",
+    "outline_build",
+    "outline_architect",
+    "draft_generate",
+    "section_writer",
+    "verify_draft",
+    "verifier",
+    "final_gate_check",
+]
+
+_STAGE_TO_TIER: dict[str, ModelTier] = {
+    "perspective_generate": "fast",
+    "perspective_planner": "fast",
+    "question_graph_build": "fast",
+    "question_architect": "fast",
+    "search_plan_create": "fast",
+    "query_planner": "fast",
+    "moderator": "fast",
+    "follow_up_question_generate": "fast",
+    "scope_classify": "reasoning",
+    "research_director": "reasoning",
+    "evidence_extract": "reasoning",
+    "evidence_curator": "reasoning",
+    "claims_construct": "reasoning",
+    "claim_builder": "reasoning",
+    "contradictions_search": "reasoning",
+    "counter_evidence": "reasoning",
+    "outline_build": "reasoning",
+    "outline_architect": "reasoning",
+    "draft_generate": "reasoning",
+    "section_writer": "reasoning",
+    "verify_draft": "verification",
+    "verifier": "verification",
+    "final_gate_check": "verification",
+}
+
 
 def get_client() -> Any:
     """Return a singleton Google GenAI client."""
@@ -25,13 +77,14 @@ def get_client() -> Any:
     if _client is None:
         from google import genai
 
-        _client = genai.Client()
+        settings = get_settings()
+        _client = genai.Client(api_key=settings.google_api_key)
     return _client
 
 
 def is_llm_available() -> bool:
     """Check if Gemini API is configured."""
-    return bool(os.environ.get("GOOGLE_API_KEY"))
+    return bool(get_settings().google_api_key)
 
 
 async def generate_structured(
@@ -56,11 +109,11 @@ async def generate_structured(
         The model's text response.
 
     Raises:
-        RuntimeError: If GOOGLE_API_KEY is not set.
+        RuntimeError: If DEEP_RESEARCH_GOOGLE_API_KEY is not set.
     """
     if not is_llm_available():
         raise RuntimeError(
-            "GOOGLE_API_KEY not set. Set it to use LLM-backed agents."
+            "DEEP_RESEARCH_GOOGLE_API_KEY not set. Set it to use LLM-backed agents."
         )
 
     resolved_model = model or get_model_for_tier("reasoning")
@@ -99,11 +152,19 @@ async def generate_structured(
     return text
 
 
-def get_model_for_tier(tier: Literal["fast", "reasoning", "verification"]) -> str:
+def get_model_for_tier(tier: ModelTier) -> str:
     """Return the configured model identifier for a routing tier."""
     settings = get_settings()
     config = getattr(settings.models, tier)
     return str(config.model_id)
+
+
+def get_model_for_stage(stage: ModelStage | str) -> str:
+    """Return the configured model identifier for a workflow stage."""
+    tier = _STAGE_TO_TIER.get(stage)
+    if tier is None:
+        raise ValueError(f"Unknown model-routed stage: {stage}")
+    return get_model_for_tier(tier)
 
 
 async def _invoke_model(
