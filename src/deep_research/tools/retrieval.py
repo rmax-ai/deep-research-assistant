@@ -11,6 +11,8 @@ from typing import Any
 
 import httpx
 
+from deep_research.policies.identity import get_current_principal
+
 logger = logging.getLogger(__name__)
 
 RETRIEVAL_TIMEOUT = 20.0
@@ -36,6 +38,7 @@ async def url_retrieve(
     Returns:
         Dict with 'url', 'title', 'content', 'content_length', 'status_code'.
     """
+    principal = get_current_principal()
     try:
         async with httpx.AsyncClient(timeout=RETRIEVAL_TIMEOUT) as client:
             response = await client.get(
@@ -55,7 +58,12 @@ async def url_retrieve(
         if len(content) > max_length:
             content = content[:max_length] + "\n\n[Content truncated]"
 
-        logger.info("url_retrieve: %s → %d chars", url, len(content))
+        logger.info(
+            "url_retrieve: %s → %d chars",
+            url,
+            len(content),
+            extra={"run_id": principal.get("run_id"), "user_id": principal.get("user_id")},
+        )
         return {
             "url": url,
             "title": title,

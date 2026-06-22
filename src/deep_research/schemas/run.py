@@ -21,6 +21,8 @@ class RunStatus(StrEnum):
     """Lifecycle status of a research run."""
 
     DRAFT = "draft"
+    QUEUED = "queued"
+    RUNNING = "running"
     SCOPE_PROPOSED = "scope_proposed"
     PLAN_PROPOSED = "plan_proposed"
     RESEARCHING = "researching"

@@ -66,6 +66,7 @@ async def stub_api_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     monkeypatch.setattr(settings.workflow, "enable_iterative_research", False)
     monkeypatch.setattr(settings.workflow, "enable_follow_up_questions", False)
     monkeypatch.setattr(settings.workflow, "maximum_parallel_questions", 1)
+    monkeypatch.setattr(settings.approvals, "mode", "auto_approve")
     routes._active_runs.clear()
     await _cancel_background_tasks()
     routes.get_event_bus().reset()
@@ -169,6 +170,50 @@ class TestCreateRun:
             json={"objective": {}},
         )
         assert response.status_code == 422
+
+    async def test_strict_mode_pauses_for_required_approval(self, client, monkeypatch: pytest.MonkeyPatch):
+        from deep_research.settings import get_settings
+
+        settings = get_settings()
+        monkeypatch.setattr(settings.approvals, "mode", "strict")
+        monkeypatch.setattr(settings.approvals, "scope_required_for_risk", "all")
+        monkeypatch.setattr(settings.approvals, "plan_required_for_risk", "all")
+
+        response = await client.post(
+            "/v1/research-runs",
+            json={
+                "objective": {
+                    "title": "Approval Test",
+                    "primary_question": "Pause until a human approves",
+                }
+            },
+            timeout=60,
+        )
+        assert response.status_code == 200
+        run_id = response.json()["run_id"]
+
+        deadline = asyncio.get_running_loop().time() + 5.0
+        while True:
+            status_response = await client.get(f"/v1/research-runs/{run_id}")
+            data = status_response.json()
+            if data["status"] == "awaiting_approval":
+                break
+            if asyncio.get_running_loop().time() >= deadline:
+                raise AssertionError("Timed out waiting for awaiting_approval")
+            await asyncio.sleep(0.01)
+
+        approvals = await client.get(f"/v1/research-runs/{run_id}/approvals")
+        assert approvals.status_code == 200
+        assert approvals.json()["approvals"]["A"]["status"] == "pending"
+
+        approve = await client.post(
+            f"/v1/research-runs/{run_id}/approvals/A",
+            json={"decision": "approved", "rationale": "Proceed"},
+            timeout=60,
+        )
+        assert approve.status_code == 200
+        next_status = await client.get(f"/v1/research-runs/{run_id}")
+        assert next_status.json()["status"] in {"queued", "running", "awaiting_approval", "completed"}
 
 
 @pytest.mark.asyncio
@@ -355,7 +400,9 @@ class TestCollaborationEndpoints:
         assert "event: run.completed" in text
 
     async def test_running_run_accumulates_live_progress_events(self, client, monkeypatch: pytest.MonkeyPatch):
-        from deep_research.agents.research_director import research_director as original_research_director
+        from deep_research.agents.research_director import (
+            research_director as original_research_director,
+        )
 
         async def slow_research_director(*args, **kwargs):
             await asyncio.sleep(0.05)

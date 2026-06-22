@@ -61,6 +61,7 @@ class ApprovalConfig(BaseSettings):
     plan_required_for_risk: Literal["high", "medium", "all", "never"] = "high"
     outline_required_for_risk: Literal["high", "medium", "all", "never"] = "high"
     publication_required_for_external: bool = True
+    mode: Literal["strict", "auto_approve"] = "strict"
 
 
 class ResearchPolicyConfig(BaseSettings):
@@ -91,6 +92,7 @@ class WorkflowConfig(BaseSettings):
     low_information_gain_cycle_threshold: int = 3
     information_gain_floor: float = 0.05
     llm_timeout_seconds: int = 45
+    retry_limit: int = 2
 
 
 class SchedulerConfig(BaseSettings):

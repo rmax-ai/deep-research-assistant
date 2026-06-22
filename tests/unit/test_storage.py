@@ -122,3 +122,111 @@ async def test_list_runs_filters_by_status(sqlite_run_store):
 
     queued = await list_runs(statuses=["queued"])
     assert [run["run_id"] for run in queued] == ["run-queued"]
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_and_node_execution_round_trip(sqlite_run_store):
+    from deep_research.storage.repositories import (
+        create_run,
+        create_workflow_checkpoint,
+        get_latest_checkpoint,
+        get_node_execution,
+        record_node_execution,
+    )
+
+    await create_run(
+        {
+            "run_id": "run-checkpoint",
+            "session_id": "session-run-checkpoint",
+            "status": "running",
+            "phase": "researching",
+            "report": "",
+            "event_count": 0,
+            "events": [],
+            "state": {"app:run_id": "run-checkpoint", "app:phase": "researching"},
+            "approvals": {},
+            "interventions": [],
+            "created_at": "2026-06-21T00:00:00+00:00",
+            "objective": {"title": "Checkpoint"},
+            "scope": {},
+            "questions_count": 0,
+            "claims_count": 0,
+            "sources_count": 0,
+        }
+    )
+    checkpoint = await create_workflow_checkpoint(
+        run_id="run-checkpoint",
+        node_name="question_graph_build",
+        node_path="question_graph_build",
+        workflow_version="1.0.0",
+        logical_input_hash="hash-1",
+        state={"app:run_id": "run-checkpoint", "app:questions": [{"text": "Q1"}]},
+    )
+    assert checkpoint["node_name"] == "question_graph_build"
+
+    await record_node_execution(
+        idempotency_key="idem-1",
+        run_id="run-checkpoint",
+        node_name="question_graph_build",
+        node_path="question_graph_build",
+        workflow_version="1.0.0",
+        logical_input_hash="hash-1",
+        result={"question_count": 1},
+        checkpoint_id=checkpoint["checkpoint_id"],
+    )
+
+    latest = await get_latest_checkpoint("run-checkpoint")
+    execution = await get_node_execution("idem-1")
+    assert latest is not None
+    assert latest["checkpoint_id"] == checkpoint["checkpoint_id"]
+    assert execution is not None
+    assert execution["result"]["question_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_audit_chain_and_approval_decisions_are_persisted(sqlite_run_store):
+    from deep_research.storage.repositories import (
+        create_run,
+        list_approval_decisions,
+        record_audit_event,
+        save_approval_decision,
+        verify_audit_chain,
+    )
+
+    await create_run(
+        {
+            "run_id": "run-audit",
+            "session_id": "session-run-audit",
+            "status": "queued",
+            "phase": "planning",
+            "report": "",
+            "event_count": 0,
+            "events": [],
+            "state": {"app:run_id": "run-audit"},
+            "approvals": {},
+            "interventions": [],
+            "created_at": "2026-06-21T00:00:00+00:00",
+            "objective": {"title": "Audit"},
+            "scope": {},
+            "questions_count": 0,
+            "claims_count": 0,
+            "sources_count": 0,
+        }
+    )
+    await record_audit_event(run_id="run-audit", event_type="run.started", principal={"user_id": "alice"})
+    await record_audit_event(run_id="run-audit", event_type="approval.requested", principal={"user_id": "alice"})
+    await save_approval_decision(
+        run_id="run-audit",
+        approval_id="A",
+        gate="A",
+        required=True,
+        status="approved",
+        rationale="ok",
+        approver_id="alice",
+        display_data={"risk_level": "high"},
+        decided_at="2026-06-21T00:00:05+00:00",
+    )
+
+    approvals = await list_approval_decisions("run-audit")
+    assert approvals["A"]["status"] == "approved"
+    assert await verify_audit_chain("run-audit") is True

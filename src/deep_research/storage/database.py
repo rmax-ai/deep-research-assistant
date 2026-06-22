@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -38,6 +40,7 @@ async def init_database() -> None:
     if settings.environment == "development":
         async with _engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            await _ensure_schema(conn)
 
 
 async def close_database() -> None:
@@ -57,3 +60,23 @@ async def get_session() -> AsyncIterator[AsyncSession]:
     assert _session_factory is not None
     async with _session_factory() as session:
         yield session
+
+
+async def _ensure_schema(conn: Any) -> None:
+    """Apply additive schema updates for local/dev databases."""
+    table_info = await conn.execute(text("PRAGMA table_info(research_runs)"))
+    columns = {str(row[1]) for row in table_info.fetchall()}
+    additions: dict[str, str] = {
+        "updated_at": "TEXT",
+        "tenant_id": "TEXT NOT NULL DEFAULT 'default'",
+        "user_id": "TEXT NOT NULL DEFAULT 'api_user'",
+        "workflow_version": "TEXT NOT NULL DEFAULT '1.0.0'",
+        "current_node": "TEXT",
+        "awaiting_approval_gate": "TEXT",
+        "resume_from_checkpoint_id": "TEXT",
+        "retry_count": "INTEGER NOT NULL DEFAULT 0",
+        "last_policy_decision_id": "TEXT",
+    }
+    for column, definition in additions.items():
+        if column not in columns:
+            await conn.execute(text(f"ALTER TABLE research_runs ADD COLUMN {column} {definition}"))

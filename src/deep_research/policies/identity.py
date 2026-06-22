@@ -22,10 +22,10 @@ class Principal(TypedDict, total=False):
 
 _DEFAULT_PRINCIPAL: Principal = {
     "tenant_id": "default",
-    "user_id": "system",
+    "user_id": "anonymous",
     "run_id": "",
     "node_path": "",
-    "agent_role": "system",
+    "agent_role": "anonymous",
     "purpose": "research",
     "policy_decision_id": None,
     "delegated_scopes": [],

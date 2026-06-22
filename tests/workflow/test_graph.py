@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from deep_research.exceptions import ApprovalRequiredError
+
 
 @pytest.mark.asyncio
 class TestWorkflowGraph:
@@ -87,6 +89,31 @@ class TestWorkflowGraph:
         result = await approve_plan(ctx, None)
         assert ctx.route == 0
         assert result["status"] == "rejected"
+
+    async def test_approve_plan_pauses_when_required_approval_is_missing(self, monkeypatch: pytest.MonkeyPatch):
+        from deep_research.settings import get_settings
+        from deep_research.workflow.graph import approve_plan
+        from deep_research.workflow.state import get_state, reset_state
+
+        reset_state()
+        settings = get_settings()
+        monkeypatch.setattr(settings.approvals, "mode", "strict")
+        monkeypatch.setattr(settings.approvals, "scope_required_for_risk", "all")
+        state = get_state()
+        state.update(
+            {
+                "app:run_id": "run-approve",
+                "app:scope": {"risk_level": "high"},
+                "app:objective": {},
+                "app:research_plan": {"approval_recommendation": {"scope_approval_required": True}},
+                "app:approval_inputs": {},
+                "app:enforce_approvals": True,
+                "app:principal": {"tenant_id": "t", "user_id": "u", "run_id": "run-approve", "agent_role": "user"},
+            }
+        )
+
+        with pytest.raises(ApprovalRequiredError):
+            await approve_plan(SimpleNamespace(route=None), None)
 
     async def test_event_emission_in_nodes(self):
         from deep_research.telemetry.events import get_event_bus

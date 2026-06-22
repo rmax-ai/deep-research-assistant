@@ -14,6 +14,8 @@ from typing import Any
 
 import httpx
 
+from deep_research.policies.identity import get_current_principal
+
 logger = logging.getLogger(__name__)
 
 SEARCH_TIMEOUT = 15.0
@@ -41,6 +43,7 @@ async def web_search(
         and 'query' and 'total_results' metadata.
     """
     max_results = min(max(max_results, 1), MAX_RESULTS)
+    principal = get_current_principal()
 
     try:
         async with httpx.AsyncClient(timeout=SEARCH_TIMEOUT) as client:
@@ -54,7 +57,12 @@ async def web_search(
 
         results = _parse_duckduckgo_html(response.text, max_results)
 
-        logger.info("web_search: query=%r returned %d results", query, len(results))
+        logger.info(
+            "web_search: query=%r returned %d results",
+            query,
+            len(results),
+            extra={"run_id": principal.get("run_id"), "user_id": principal.get("user_id")},
+        )
         return {
             "query": query,
             "total_results": len(results),

@@ -19,12 +19,24 @@ from google.adk.runners import InMemoryRunner
 from google.genai.types import Content, Part
 from pydantic import BaseModel, Field
 
+from deep_research.exceptions import ApprovalRequiredError, TransientWorkflowError
 from deep_research.nodes.scope import apply_scope_change
+from deep_research.policies.identity import Principal
+from deep_research.settings import get_settings
 from deep_research.storage.database import close_database, init_database
-from deep_research.storage.repositories import create_run, get_run, list_runs, update_run
+from deep_research.storage.repositories import (
+    create_run,
+    get_run,
+    list_approval_decisions,
+    list_runs,
+    save_approval_decision,
+    update_run,
+)
 from deep_research.telemetry import configure_logging
+from deep_research.telemetry.audit import record_event
 from deep_research.telemetry.events import get_event_bus
 from deep_research.workflow.graph import build_research_workflow
+from deep_research.workflow.recovery import load_latest_checkpoint_for_run, restore_checkpoint
 from deep_research.workflow.state import get_state, reset_state, set_state
 
 configure_logging()
@@ -32,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Initialize and dispose app-scoped resources."""
     await init_database()
     await _resume_incomplete_runs()
@@ -66,6 +78,9 @@ class ObjectiveRequest(BaseModel):
 class CreateRunRequest(BaseModel):
     objective: ObjectiveRequest
     mode: str = "review_first"
+    tenant_id: str = "default"
+    user_id: str = "api_user"
+    delegated_scopes: list[str] = Field(default_factory=list)
     constraints: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -111,6 +126,46 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _build_principal(
+    *,
+    tenant_id: str,
+    user_id: str,
+    run_id: str,
+    node_path: str = "api",
+    agent_role: str = "user",
+    purpose: str = "research",
+    delegated_scopes: list[str] | None = None,
+) -> Principal:
+    return Principal(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        run_id=run_id,
+        node_path=node_path,
+        agent_role=agent_role,
+        purpose=purpose,
+        policy_decision_id=None,
+        delegated_scopes=list(delegated_scopes or []),
+    )
+
+
+async def _record_runtime_event(
+    event_type: str,
+    *,
+    run_id: str,
+    principal: dict[str, Any],
+    **details: Any,
+) -> None:
+    await record_event(run_id, event_type, principal=principal, details=details)
+    await get_event_bus().publish(event_type, {"run_id": run_id, **details})
+
+
+def _is_transient_error(exc: Exception) -> bool:
+    if isinstance(exc, (TimeoutError, ConnectionError, TransientWorkflowError)):
+        return True
+    message = str(exc).lower()
+    return any(token in message for token in ("timed out", "temporar", "unavailable", "connection"))
+
+
 async def _load_run(run_id: str) -> dict[str, Any] | None:
     run_data = _active_runs.get(run_id)
     if run_data is not None:
@@ -136,6 +191,10 @@ def _sync_run_summary(run_data: dict[str, Any]) -> None:
     run_data["sources_count"] = len(state.get("app:sources", []))
     run_data["report"] = state.get("app:final_report", run_data.get("report", ""))
     run_data["phase"] = state.get("app:phase", run_data.get("phase", "completed"))
+    run_data["awaiting_approval_gate"] = state.get(
+        "app:awaiting_approval_gate",
+        run_data.get("awaiting_approval_gate"),
+    )
 
 
 async def _persist_run(run_data: dict[str, Any], *, create: bool = False) -> dict[str, Any]:
@@ -145,13 +204,10 @@ async def _persist_run(run_data: dict[str, Any], *, create: bool = False) -> dic
     return run_data
 
 
-def _default_approval_inputs(mode: str) -> dict[str, dict[str, str]]:
-    return {
-        "A": {"status": "approved"},
-        "B": {"status": "approved"},
-        "C": {"status": "approved"},
-        "D": {"status": "approved"},
-    }
+def _default_approval_inputs() -> dict[str, dict[str, str]]:
+    if get_settings().approvals.mode != "auto_approve":
+        return {}
+    return {gate: {"status": "approved"} for gate in ("A", "B", "C", "D")}
 
 
 def _build_objective_text(request: ObjectiveRequest) -> str:
@@ -203,6 +259,7 @@ def _schedule_run_execution(run_data: dict[str, Any], *, resumed: bool = False) 
 
     state = run_data.setdefault("state", {})
     session_id = str(run_data.get("session_id", f"session_{run_id}"))
+    user_id = str(run_data.get("user_id", "api_user"))
     objective_text = _objective_text_from_run_data(run_data)
     if not objective_text:
         logger.warning("skipping run resume without objective text", extra={"run_id": run_id})
@@ -214,13 +271,17 @@ def _schedule_run_execution(run_data: dict[str, Any], *, resumed: bool = False) 
         run_data["completed_at"] = None
         run_data["error"] = None
         state["app:resumed_after_restart"] = True
+        state["app:resume_enabled"] = True
+        checkpoint_id = run_data.get("resume_from_checkpoint_id")
+        if checkpoint_id:
+            state["app:resume_checkpoint_id"] = checkpoint_id
 
     _active_runs[run_id] = run_data
     _run_tasks[run_id] = asyncio.create_task(
         _execute_research_run(
             run_id=run_id,
             session_id=session_id,
-            user_id="api_user",
+            user_id=user_id,
             objective_text=objective_text,
             state=state,
         )
@@ -228,7 +289,7 @@ def _schedule_run_execution(run_data: dict[str, Any], *, resumed: bool = False) 
 
 
 async def _resume_incomplete_runs() -> None:
-    persisted_runs = await list_runs(statuses=["queued", "running"])
+    persisted_runs = await list_runs(statuses=["queued", "running", "interrupted"])
     for run_data in persisted_runs:
         run_id = str(run_data["run_id"])
         logger.info(
@@ -247,10 +308,33 @@ async def _execute_research_run(
     state: dict[str, Any],
 ) -> None:
     run_data = await _require_run(run_id)
+    checkpoint = await load_latest_checkpoint_for_run(run_id)
+    effective_state = deepcopy(state)
+    if checkpoint is not None:
+        effective_state = restore_checkpoint(checkpoint["state"], effective_state)
+        effective_state["app:resume_enabled"] = True
+        effective_state["app:resume_from_node"] = checkpoint["node_name"]
+        effective_state["app:resume_checkpoint_id"] = checkpoint["checkpoint_id"]
+        await _record_runtime_event(
+            "checkpoint.restored",
+            run_id=run_id,
+            principal=effective_state.get("app:principal", {}),
+            checkpoint_id=checkpoint["checkpoint_id"],
+            node_name=checkpoint["node_name"],
+        )
+    if effective_state.get("app:resumed_after_restart"):
+        await _record_runtime_event(
+            "run.resumed",
+            run_id=run_id,
+            principal=effective_state.get("app:principal", {}),
+            checkpoint_id=effective_state.get("app:resume_checkpoint_id"),
+        )
+
     run_data["status"] = "running"
     run_data["started_at"] = _now()
+    run_data["awaiting_approval_gate"] = None
     await _persist_run(run_data)
-    set_state(state)
+    set_state(effective_state)
     bus = get_event_bus()
     live_events = run_data.setdefault("events", [])
 
@@ -289,6 +373,8 @@ async def _execute_research_run(
         terminal_run_data["approvals"] = deepcopy(final_state.get("app:approval_decisions", {}))
         terminal_run_data["interventions"] = list(final_state.get("app:pending_interventions", []))
         terminal_run_data["completed_at"] = _now()
+        terminal_run_data["awaiting_approval_gate"] = None
+        terminal_run_data["resume_from_checkpoint_id"] = final_state.get("app:resume_from_checkpoint_id")
         logger.info(
             "research run completed",
             extra={
@@ -301,19 +387,37 @@ async def _execute_research_run(
         await _persist_run(terminal_run_data)
         run_data.clear()
         run_data.update(terminal_run_data)
+    except ApprovalRequiredError as exc:
+        final_state = deepcopy(get_state())
+        terminal_run_data = dict(run_data)
+        terminal_run_data["state"] = final_state
+        terminal_run_data["status"] = "awaiting_approval"
+        terminal_run_data["phase"] = "awaiting_approval"
+        terminal_run_data["awaiting_approval_gate"] = exc.gate
+        terminal_run_data["resume_from_checkpoint_id"] = final_state.get("app:resume_from_checkpoint_id")
+        terminal_run_data["approvals"] = deepcopy(final_state.get("app:approval_decisions", {}))
+        await _persist_run(terminal_run_data)
+        run_data.clear()
+        run_data.update(terminal_run_data)
     except Exception as exc:
         final_state = deepcopy(get_state())
         terminal_run_data = dict(run_data)
         terminal_run_data["state"] = final_state
-        terminal_run_data["status"] = "failed"
-        terminal_run_data["phase"] = final_state.get("app:phase", run_data.get("phase", "failed"))
+        transient = _is_transient_error(exc)
+        terminal_run_data["status"] = "interrupted" if transient else "failed"
+        terminal_run_data["phase"] = final_state.get(
+            "app:phase",
+            run_data.get("phase", "interrupted" if transient else "failed"),
+        )
         terminal_run_data["error"] = str(exc)
-        terminal_run_data["completed_at"] = _now()
+        terminal_run_data["completed_at"] = None if transient else _now()
+        terminal_run_data["retry_count"] = int(run_data.get("retry_count", 0)) + (1 if transient else 0)
+        terminal_run_data["resume_from_checkpoint_id"] = final_state.get("app:resume_from_checkpoint_id")
         logger.exception(
             "research run failed",
             extra={
                 "run_id": run_id,
-                "status": "failed",
+                "status": terminal_run_data["status"],
                 "phase": terminal_run_data["phase"],
                 "error_type": type(exc).__name__,
             },
@@ -339,14 +443,22 @@ async def create_research_run(request: CreateRunRequest) -> RunStatusResponse:
     run_id = str(uuid.uuid4())[:8]
     session_id = f"session_{run_id}"
     state: dict[str, Any] = {}
+    principal = _build_principal(
+        tenant_id=request.tenant_id,
+        user_id=request.user_id,
+        run_id=run_id,
+        delegated_scopes=request.delegated_scopes,
+    )
     state["app:run_id"] = run_id
     state["app:run_mode"] = request.mode
     state["app:phase"] = "planning"
-    state["app:approval_inputs"] = deepcopy(
-        request.constraints.get("approval_inputs", _default_approval_inputs(request.mode))
-    )
+    state["app:approval_inputs"] = deepcopy(request.constraints.get("approval_inputs", _default_approval_inputs()))
     state["app:pending_interventions"] = list(request.constraints.get("interventions", []))
     state["app:initial_objective_text"] = _build_objective_text(request.objective)
+    state["app:principal"] = dict(principal)
+    state["app:workflow_version"] = get_settings().workflow.version
+    state["app:persist_runtime"] = True
+    state["app:enforce_approvals"] = True
     run_data = {
         "run_id": run_id,
         "session_id": session_id,
@@ -359,10 +471,20 @@ async def create_research_run(request: CreateRunRequest) -> RunStatusResponse:
         "approvals": {},
         "interventions": list(state.get("app:pending_interventions", [])),
         "created_at": _now(),
+        "updated_at": _now(),
         "objective": request.objective.model_dump(),
         "scope": {},
+        "tenant_id": request.tenant_id,
+        "user_id": request.user_id,
+        "workflow_version": get_settings().workflow.version,
+        "current_node": None,
+        "awaiting_approval_gate": None,
+        "resume_from_checkpoint_id": None,
+        "retry_count": 0,
+        "last_policy_decision_id": None,
     }
     await _persist_run(run_data, create=True)
+    await _record_runtime_event("run.started", run_id=run_id, principal=dict(principal), status="queued")
     _schedule_run_execution(run_data)
 
     return RunStatusResponse(
@@ -530,6 +652,12 @@ async def intervene(run_id: str, intervention: InterventionRequest) -> dict[str,
         )
 
     await _persist_run(run_data)
+    await _record_runtime_event(
+        "intervention.submitted",
+        run_id=run_id,
+        principal=state.get("app:principal", {}),
+        intervention=record,
+    )
     return {
         "status": "recorded",
         "run_id": run_id,
@@ -551,7 +679,35 @@ async def submit_approval(run_id: str, approval_id: str, request: ApprovalAction
     decision["decided_at"] = _now()
     state.setdefault("app:approval_inputs", {})[approval_id] = {"status": request.decision}
     run_data.setdefault("approvals", {})[approval_id] = decision
+    await save_approval_decision(
+        run_id=run_id,
+        approval_id=approval_id,
+        gate=str(decision.get("gate", approval_id)),
+        required=bool(decision.get("required", True)),
+        status=request.decision,
+        rationale=request.rationale,
+        approver_id=request.approver_id,
+        display_data=decision.get("display_data", {}),
+        decided_at=decision["decided_at"],
+    )
     await _persist_run(run_data)
+    await _record_runtime_event(
+        "approval.decided",
+        run_id=run_id,
+        principal=state.get("app:principal", {}),
+        approval_id=approval_id,
+        status=request.decision,
+        rationale=request.rationale,
+        approver_id=request.approver_id,
+    )
+
+    if run_data.get("status") == "awaiting_approval":
+        run_data["awaiting_approval_gate"] = None
+        run_data["status"] = "queued"
+        run_data["phase"] = state.get("app:phase", "planning")
+        state["app:resume_enabled"] = True
+        await _persist_run(run_data)
+        _schedule_run_execution(run_data, resumed=True)
 
     return {
         "run_id": run_id,
@@ -566,7 +722,9 @@ async def get_approvals(run_id: str) -> dict[str, Any]:
     """Return the current approval gate state for a run."""
     run_data = await _require_run(run_id)
     state = run_data.get("state", {})
-    approvals = state.get("app:approval_decisions", run_data.get("approvals", {}))
+    approvals = await list_approval_decisions(run_id)
+    if not approvals:
+        approvals = state.get("app:approval_decisions", run_data.get("approvals", {}))
     return {
         "run_id": run_id,
         "approvals": approvals if isinstance(approvals, dict) else {},

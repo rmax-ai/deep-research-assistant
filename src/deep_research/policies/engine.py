@@ -17,6 +17,7 @@ class PolicyDecision(enum.StrEnum):
 
 # Role-to-tool allowlists
 _ROLE_TOOLS: dict[str, set[str]] = {
+    "anonymous": set(),
     "research_director": {"scope_classify", "perspective_generate"},
     "perspective_planner": {"perspective_generate"},
     "question_architect": {"question_graph_build"},
@@ -31,7 +32,7 @@ _ROLE_TOOLS: dict[str, set[str]] = {
     "verifier": {"verify_draft", "check_entailment"},
     "executive_synthesizer": {"render_output"},
     "knowledge_organizer": {"concept_map", "topic_assignment"},
-    "system": {"*"},  # System can access all tools
+    "system": {"*"},  # Reserved for explicit internal operations only
 }
 
 # Stage-based tool reduction
@@ -62,8 +63,8 @@ def evaluate_policy(
     ctx = context or {}
     role = str(principal.get("agent_role", "system"))
 
-    # System bypass
-    if role == "system":
+    # System bypass only for explicit internal/bootstrap actions.
+    if role == "system" and bool(ctx.get("internal")):
         return PolicyDecision.ALLOW
 
     # Role-based allowlist

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import time
+from copy import deepcopy
 from typing import Any, cast
 
 from google.adk.agents.context import Context
 from google.adk.workflow import START, Edge, FunctionNode, Workflow
 
+from deep_research.exceptions import ApprovalRequiredError, PolicyDeniedError
 from deep_research.nodes.approval import ApprovalGate, check_gate
 from deep_research.nodes.budget import (
     enforce_perspective_budget,
@@ -21,13 +25,52 @@ from deep_research.nodes.deduplication import cluster_sources, deduplicate_sourc
 from deep_research.nodes.scheduler import select_frontier_questions
 from deep_research.nodes.scope import apply_scope_change
 from deep_research.policies.engine import evaluate_policy
-from deep_research.policies.identity import get_current_principal
+from deep_research.policies.identity import (
+    get_current_principal,
+    propagate_principal,
+    set_principal,
+)
 from deep_research.settings import get_settings
+from deep_research.storage.repositories import (
+    get_node_execution,
+    record_audit_event,
+    record_node_execution,
+    save_approval_decision,
+    update_run_runtime,
+)
 from deep_research.telemetry.events import get_event_bus
+from deep_research.workflow.recovery import create_checkpoint
 from deep_research.workflow.state import get_state
 from deep_research.workflow.stopping import evaluate_stopping
 
 logger = logging.getLogger(__name__)
+
+_NODE_AGENT_ROLES = {
+    "scope_classify": "research_director",
+    "perspective_generate": "perspective_planner",
+    "question_graph_build": "question_architect",
+    "approve_plan": "research_director",
+    "scheduler_select": "moderator",
+    "search_plan_create": "query_planner",
+    "source_retrieve": "query_planner",
+    "source_policy_apply": "source_appraiser",
+    "evidence_extract": "evidence_curator",
+    "claims_construct": "claim_builder",
+    "knowledge_organize": "knowledge_organizer",
+    "contradictions_search": "counter_evidence",
+    "coverage_calculate": "moderator",
+    "moderator": "moderator",
+    "interventions_apply": "moderator",
+    "scope_change_apply": "research_director",
+    "stop_evaluate": "moderator",
+    "outline_build": "outline_architect",
+    "approve_outline": "outline_architect",
+    "draft_generate": "section_writer",
+    "verify_draft": "verifier",
+    "repair_draft": "verifier",
+    "final_gate_check": "executive_synthesizer",
+    "render_output": "executive_synthesizer",
+}
 
 
 def _workflow_log(level: int, message: str, **fields: Any) -> None:
@@ -86,6 +129,42 @@ def _state_counts(state: dict[str, Any]) -> dict[str, int]:
     }
 
 
+def _workflow_version(state: dict[str, Any]) -> str:
+    configured = get_settings().workflow.version
+    return str(state.get("app:workflow_version", configured))
+
+
+def _json_hash(value: Any) -> str:
+    payload = json.dumps(value, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _idempotency_key(run_id: str, node_name: str, logical_input_hash: str, workflow_version: str) -> str:
+    payload = f"{run_id}:{node_name}:{logical_input_hash}:{workflow_version}"
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _should_persist_runtime(state: dict[str, Any]) -> bool:
+    return bool(state.get("app:persist_runtime"))
+
+
+async def _publish(event_type: str, **payload: Any) -> None:
+    state = get_state()
+    run_id = str(payload.get("run_id", _run_id(state)))
+    principal = payload.get("principal")
+    if not isinstance(principal, dict):
+        principal = dict(get_current_principal(state))
+    details = {key: value for key, value in payload.items() if key != "principal"}
+    if run_id and _should_persist_runtime(state):
+        await record_audit_event(
+            run_id=run_id,
+            event_type=event_type,
+            principal=principal,
+            details=details,
+        )
+    await get_event_bus().publish(event_type, {"run_id": run_id, **payload})
+
+
 async def _publish_route_selection(state: dict[str, Any], node: str, route: int) -> None:
     await _publish(
         "route.selected",
@@ -100,18 +179,86 @@ async def _publish_route_selection(state: dict[str, Any], node: str, route: int)
 def _instrument_node(node_name: str, node_func: Any) -> Any:
     async def _wrapped(ctx: Context, node_input: Any) -> dict[str, Any]:
         state = get_state()
+        run_id = _run_id(state)
+        workflow_version = _workflow_version(state)
+        agent_role = _NODE_AGENT_ROLES.get(node_name, node_name)
+        base_principal = get_current_principal(state)
+        node_principal = propagate_principal(base_principal, node_name, agent_role)
+        set_principal(state, node_principal)
+        state["app:current_node"] = node_name
+        logical_input_hash = _json_hash(node_input)
+        idempotency_key = _idempotency_key(run_id, node_name, logical_input_hash, workflow_version)
+        resume_from_node = state.get("app:resume_from_node")
+        resume_enabled = bool(state.get("app:resume_enabled"))
+
+        if run_id and _should_persist_runtime(state) and resume_enabled and isinstance(resume_from_node, str):
+            try:
+                resume_index = _NODE_SEQUENCE.index(resume_from_node)
+                current_index = _NODE_SEQUENCE.index(node_name)
+            except ValueError:
+                resume_index = -1
+                current_index = 0
+            if resume_index >= 0 and current_index <= resume_index:
+                cached = await get_node_execution(idempotency_key)
+                if cached is not None and cached.get("status") == "completed":
+                    return cast(dict[str, Any], cached.get("result", {}))
+
         start_context = _node_context(state, node_name)
         await _publish(
             "node.started",
             **start_context,
+            workflow_version=workflow_version,
+            node_path=node_name,
+            agent_name=agent_role,
+            retry_count=int(state.get("app:retry_count", 0)),
+            principal=dict(node_principal),
             counts=_state_counts(state),
             message=f"{node_name} started",
         )
+        if run_id and _should_persist_runtime(state):
+            await update_run_runtime(
+                run_id,
+                state=deepcopy(state),
+                status="running",
+                phase=str(state.get("app:phase", "planning")),
+                current_node=node_name,
+                workflow_version=workflow_version,
+                retry_count=int(state.get("app:retry_count", 0)),
+            )
         _workflow_log(logging.DEBUG, "workflow node started", status="started", **start_context)
         started_at = time.perf_counter()
 
         try:
             result = await node_func(ctx, node_input)
+        except ApprovalRequiredError as exc:
+            paused_state = get_state()
+            paused_state["app:awaiting_approval_gate"] = exc.gate
+            paused_state["app:phase"] = "awaiting_approval"
+            latest_checkpoint_id = paused_state.get("app:resume_from_checkpoint_id")
+            if run_id and _should_persist_runtime(paused_state):
+                await update_run_runtime(
+                    run_id,
+                    state=deepcopy(paused_state),
+                    status="awaiting_approval",
+                    phase="awaiting_approval",
+                    current_node=node_name,
+                    awaiting_approval_gate=exc.gate,
+                    resume_from_checkpoint_id=str(latest_checkpoint_id) if latest_checkpoint_id else None,
+                    workflow_version=workflow_version,
+                )
+            raise
+        except PolicyDeniedError:
+            state = get_state()
+            await _publish(
+                "policy.denied",
+                run_id=run_id,
+                node=node_name,
+                workflow_version=workflow_version,
+                node_path=node_name,
+                principal=dict(get_current_principal(state)),
+                message=f"{node_name} denied by policy",
+            )
+            raise
         except Exception as exc:
             state = get_state()
             duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
@@ -119,8 +266,14 @@ def _instrument_node(node_name: str, node_func: Any) -> Any:
             await _publish(
                 "node.failed",
                 **failure_context,
+                workflow_version=workflow_version,
+                node_path=node_name,
+                agent_name=agent_role,
+                principal=dict(get_current_principal(state)),
                 duration_ms=duration_ms,
                 error_type=type(exc).__name__,
+                error_classification=type(exc).__name__,
+                retry_count=int(state.get("app:retry_count", 0)),
                 counts=_state_counts(state),
                 message=f"{node_name} failed",
             )
@@ -139,16 +292,65 @@ def _instrument_node(node_name: str, node_func: Any) -> Any:
         duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
         route = getattr(ctx, "route", None)
         completion_context = _node_context(state, node_name)
+        checkpoint_id: str | None = None
+        if run_id and _should_persist_runtime(state):
+            checkpoint = await create_checkpoint(
+                deepcopy(state),
+                run_id=run_id,
+                node_name=node_name,
+                node_path=node_name,
+                workflow_version=workflow_version,
+                logical_input_hash=logical_input_hash,
+            )
+            checkpoint_id = str(checkpoint["checkpoint_id"])
+            state["app:resume_from_checkpoint_id"] = checkpoint_id
+            await record_node_execution(
+                idempotency_key=idempotency_key,
+                run_id=run_id,
+                node_name=node_name,
+                node_path=node_name,
+                workflow_version=workflow_version,
+                logical_input_hash=logical_input_hash,
+                result=cast(dict[str, Any], result),
+                checkpoint_id=checkpoint_id,
+            )
+            await _publish(
+                "checkpoint.created",
+                run_id=run_id,
+                node=node_name,
+                node_path=node_name,
+                workflow_version=workflow_version,
+                checkpoint_id=checkpoint_id,
+                principal=dict(get_current_principal(state)),
+                message=f"Checkpoint created after {node_name}",
+            )
         await _publish(
             "node.completed",
             **completion_context,
+            workflow_version=workflow_version,
+            node_path=node_name,
+            agent_name=agent_role,
+            principal=dict(get_current_principal(state)),
             status="ok",
             duration_ms=duration_ms,
             route=route,
+            retry_count=int(state.get("app:retry_count", 0)),
             result=_result_summary(result),
             counts=_state_counts(state),
             message=f"{node_name} completed",
         )
+        if run_id and _should_persist_runtime(state):
+            await update_run_runtime(
+                run_id,
+                state=deepcopy(state),
+                status="running",
+                phase=str(state.get("app:phase", "planning")),
+                current_node=node_name,
+                awaiting_approval_gate="",
+                resume_from_checkpoint_id=checkpoint_id or "",
+                workflow_version=workflow_version,
+                retry_count=int(state.get("app:retry_count", 0)),
+            )
         _workflow_log(
             logging.DEBUG,
             "workflow node completed",
@@ -208,11 +410,6 @@ def _append_unique_questions(existing: list[dict[str, Any]], new_questions: list
     return existing
 
 
-async def _publish(event_type: str, **payload: Any) -> None:
-    run_id = str(payload.get("run_id", ""))
-    await get_event_bus().publish(event_type, {"run_id": run_id, **payload})
-
-
 def _run_id(state: dict[str, Any]) -> str:
     return str(state.get("app:run_id", ""))
 
@@ -233,9 +430,42 @@ async def _resolve_approval(ctx: Context, gate: ApprovalGate, state: dict[str, A
         ctx.route = 2
         gate.status = "not_required"
     else:
-        status = _approval_input_for(state, gate.gate) or "approved"
-        gate.status = status
-        if status == "rejected":
+        status = _approval_input_for(state, gate.gate)
+        approvals_enforced = bool(state.get("app:enforce_approvals"))
+        if status == "pending" and not approvals_enforced:
+            status = None
+        if status is None and (
+            get_settings().approvals.mode == "auto_approve" or not approvals_enforced
+        ):
+            status = "approved"
+        gate.status = status or "pending"
+        if gate.status == "pending":
+            state["app:awaiting_approval_gate"] = gate.gate
+            state.setdefault("app:approval_decisions", {})[gate.gate] = gate.model_dump()
+            if _run_id(state) and _should_persist_runtime(state):
+                await save_approval_decision(
+                    run_id=_run_id(state),
+                    approval_id=gate.gate,
+                    gate=gate.gate,
+                    required=True,
+                    status="pending",
+                    rationale="",
+                    approver_id="",
+                    display_data=gate.display_data,
+                    decided_at=None,
+                )
+            await _publish(
+                "approval.requested",
+                run_id=_run_id(state),
+                gate=gate.gate,
+                required=True,
+                status=gate.status,
+                display_data=gate.display_data,
+                principal=dict(get_current_principal(state)),
+                message=f"Approval gate {gate.gate} is pending",
+            )
+            raise ApprovalRequiredError(gate.gate)
+        if gate.status == "rejected":
             ctx.route = 0
         else:
             ctx.route = 1
@@ -246,12 +476,26 @@ async def _resolve_approval(ctx: Context, gate: ApprovalGate, state: dict[str, A
             required=True,
             status=gate.status,
             display_data=gate.display_data,
+            principal=dict(get_current_principal(state)),
             approval_gate=gate.gate,
             message=f"Approval gate {gate.gate} is {gate.status}",
         )
 
     decisions = state.setdefault("app:approval_decisions", {})
     decisions[gate.gate] = gate.model_dump()
+    state["app:awaiting_approval_gate"] = None
+    if _run_id(state) and _should_persist_runtime(state):
+        await save_approval_decision(
+            run_id=_run_id(state),
+            approval_id=gate.gate,
+            gate=gate.gate,
+            required=gate.required,
+            status=gate.status,
+            rationale=str(decisions[gate.gate].get("rationale", "")),
+            approver_id=str(decisions[gate.gate].get("approver_id", "")),
+            display_data=gate.display_data,
+            decided_at=decisions[gate.gate].get("decided_at"),
+        )
     return gate.model_dump()
 
 
@@ -362,19 +606,11 @@ async def approve_plan(ctx: Context, node_input: Any) -> dict[str, Any]:
     gate_a = await check_gate("A", state, settings)
     state["app:last_gate_A"] = gate_a.model_dump()
     if gate_a.required:
-        gate_a.status = _approval_input_for(state, "A") or "approved"
-        state.setdefault("app:approval_decisions", {})["A"] = gate_a.model_dump()
-        await _publish(
-            "approval.requested",
-            run_id=_run_id(state),
-            gate=gate_a.gate,
-            required=True,
-            status=gate_a.status,
-            display_data=gate_a.display_data,
-        )
-        if gate_a.status == "rejected":
-            ctx.route = 0
-            return gate_a.model_dump()
+        gate_a_resolved = await _resolve_approval(ctx, gate_a, state)
+        if ctx.route == 0:
+            return gate_a_resolved
+        if ctx.route == 2:
+            return gate_a_resolved
 
     gate_b = await check_gate("B", state, settings)
     state["app:last_gate_B"] = gate_b.model_dump()
@@ -498,14 +734,26 @@ async def source_policy_apply(ctx: Context, node_input: Any) -> dict[str, Any]:
     rejected = []
     for src in sources:
         # Check policy for source retrieval
+        decision_id = _json_hash({"resource": src.get("canonical_uri", src.get("url", "")), "node": "source_policy_apply"})
+        state["app:last_policy_decision_id"] = decision_id
         decision = evaluate_policy(
             dict(principal),
             action="source_retrieve",
             resource=str(src.get("canonical_uri", src.get("url", ""))),
-            context={"stage": state.get("app:phase", "")},
+            context={"stage": state.get("app:phase", ""), "policy_decision_id": decision_id},
         )
         if decision.value == "deny":
             rejected.append({**src, "rejection_reason": "policy_deny"})
+            await _publish(
+                "policy.denied",
+                run_id=_run_id(state),
+                node="source_policy_apply",
+                node_path="source_policy_apply",
+                principal=dict(principal),
+                policy_decision_id=decision_id,
+                resource=str(src.get("canonical_uri", src.get("url", ""))),
+                message="Source denied by policy",
+            )
             continue
 
         # Simple heuristics for source quality
@@ -540,6 +788,9 @@ async def source_policy_apply(ctx: Context, node_input: Any) -> dict[str, Any]:
         "policy.applied",
         run_id=_run_id(state),
         node="source_policy_apply",
+        node_path="source_policy_apply",
+        principal=dict(principal),
+        policy_decision_id=state.get("app:last_policy_decision_id"),
         accepted=len(accepted),
         rejected=len(rejected),
         deduplicated=deduped_count,
@@ -863,7 +1114,9 @@ async def stop_evaluate(ctx: Context, node_input: Any) -> dict[str, Any]:
         run_id=_run_id(state),
         should_stop=bool(decision.get("should_stop")),
         stop_reasons=decision.get("reasons", []),
-        unresolved_material_questions=len(decision.get("unresolved_material_questions", [])),
+        unresolved_material_questions=len(
+            cast(list[Any], decision.get("unresolved_material_questions", []))
+        ),
         marginal_information_gain=decision.get("marginal_information_gain", 0.0),
         primary_source_coverage=decision.get("primary_source_coverage", 0.0),
         message="Stop evaluation completed",
@@ -1129,6 +1382,7 @@ _ALL_NODE_FUNCS: list[tuple[str, Any]] = [
     ("publication_not_required", publication_not_required),
     ("render_output", render_output),
 ]
+_NODE_SEQUENCE = [name for name, _ in _ALL_NODE_FUNCS]
 
 
 def _build_edges(nodes: dict[str, FunctionNode]) -> list[Edge]:

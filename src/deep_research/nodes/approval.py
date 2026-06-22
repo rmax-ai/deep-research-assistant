@@ -38,6 +38,8 @@ async def check_gate(gate: str, run_state: dict[str, Any], settings: Any) -> App
     objective = run_state.get("app:objective", {})
     current_risk = str(scope.get("risk_level", "medium"))
     approval_recommendation = run_state.get("app:research_plan", {}).get("approval_recommendation", {})
+    source_constraints = scope.get("source_constraints", {}) if isinstance(scope, dict) else {}
+    blocked_domains = source_constraints.get("blocked_domains", []) if isinstance(source_constraints, dict) else []
 
     if gate == "A":
         required = _risk_requires(current_risk, settings.approvals.scope_required_for_risk) or bool(
@@ -46,14 +48,20 @@ async def check_gate(gate: str, run_state: dict[str, Any], settings: Any) -> App
         display_data = {
             "objective": objective,
             "scope": scope,
+            "risk_level": current_risk,
+            "restricted_corpora": blocked_domains,
             "proposed_perspectives": run_state.get("app:proposed_perspectives", []),
+            "budget": run_state.get("app:research_plan", {}).get("proposed_budget", {}),
         }
     elif gate == "B":
         required = _risk_requires(current_risk, settings.approvals.plan_required_for_risk)
         display_data = {
             "questions": run_state.get("app:questions", []),
             "perspectives": run_state.get("app:perspectives", []),
+            "source_strategy": run_state.get("app:research_plan", {}).get("source_strategy", {}),
             "budget": run_state.get("app:research_plan", {}).get("proposed_budget", {}),
+            "exclusions": scope.get("excluded_topics", []),
+            "limitations": run_state.get("app:research_plan", {}).get("limitations", []),
         }
     elif gate == "C":
         required = _risk_requires(current_risk, settings.approvals.outline_required_for_risk) or bool(
@@ -61,8 +69,16 @@ async def check_gate(gate: str, run_state: dict[str, Any], settings: Any) -> App
         )
         display_data = {
             "outline": run_state.get("app:outline", {}),
-            "claims": run_state.get("app:claims", []),
-            "evidence_count": len(run_state.get("app:evidence", [])),
+            "principal_claims": run_state.get("app:claims", [])[:10],
+            "confidence_summary": run_state.get("app:coverage", {}),
+            "source_mix": {
+                "sources": len(run_state.get("app:sources", [])),
+                "evidence": len(run_state.get("app:evidence", [])),
+            },
+            "contradictions": run_state.get("app:contradictions", []),
+            "unresolved_questions": [
+                q for q in run_state.get("app:questions", []) if q.get("status") != "resolved"
+            ][:10],
         }
     elif gate == "D":
         required = bool(approval_recommendation.get("publication_approval_required")) or bool(
@@ -70,8 +86,13 @@ async def check_gate(gate: str, run_state: dict[str, Any], settings: Any) -> App
             and objective.get("intended_audience")
         )
         display_data = {
-            "drafts": run_state.get("app:drafts", []),
+            "final_claims": run_state.get("app:claims", [])[:10],
+            "recommendations": run_state.get("app:drafts", []),
             "verification": run_state.get("app:verification", {}),
+            "risk_indicators": {
+                "risk_level": current_risk,
+                "blocking_findings": run_state.get("app:verification", {}).get("blocking_findings", 0),
+            },
             "report_preview": run_state.get("app:final_report_preview", ""),
         }
     else:
