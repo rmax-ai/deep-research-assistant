@@ -1268,7 +1268,7 @@ async def verify_draft(ctx: Context, node_input: Any) -> dict[str, Any]:
         "verification.passed" if result["passed"] else "verification.failed",
         run_id=_run_id(state),
         verification=result,
-        blocking_findings=blocking,
+        blocking_findings=int(result.get("blocking_findings", 0) or 0),
         passed=result["passed"],
         message="Draft verification completed",
     )

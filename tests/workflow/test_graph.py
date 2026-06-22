@@ -293,6 +293,38 @@ class TestWorkflowGraph:
         assert state["app:verify_result"]["passed"] is True
         assert ctx.route == 1
 
+    async def test_verify_draft_publishes_verification_result(self, monkeypatch: pytest.MonkeyPatch):
+        from deep_research.workflow.graph import verify_draft
+        from deep_research.workflow.state import get_state, reset_state
+
+        reset_state()
+        state = get_state()
+        state.update(
+            {
+                "app:run_id": "run-verify",
+                "app:drafts": [{"section_id": "sec-1", "content": "Draft text"}],
+                "app:claims": [],
+                "app:evidence": [],
+            }
+        )
+
+        async def fake_verifier(drafts, claims, evidence):
+            assert drafts == state["app:drafts"]
+            assert claims == []
+            assert evidence == []
+            return {"blocking_findings": 2, "passed": False, "findings": [{"severity": "blocking"}]}
+
+        monkeypatch.setattr("deep_research.agents.verifier.verifier", fake_verifier)
+
+        ctx = SimpleNamespace(route=None)
+        result = await verify_draft(ctx, None)
+
+        assert result["blocking_findings"] == 2
+        assert result["passed"] is False
+        assert state["app:verify_result"]["blocking_findings"] == 2
+        assert state["app:verification"]["blocking_findings"] == 2
+        assert ctx.route == 0
+
     async def test_repair_draft_fails_immediately_when_no_drafts_exist(self):
         from deep_research.workflow.graph import repair_draft
         from deep_research.workflow.state import get_state, reset_state
