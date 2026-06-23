@@ -48,6 +48,12 @@ uv sync --extra dev --extra pg
 
 ### 2. Configure environment
 
+Start from the checked-in example file:
+
+```bash
+cp .env.example .env
+```
+
 Full runtime execution needs:
 
 - `DEEP_RESEARCH_GOOGLE_API_KEY` for Gemini-backed agents
