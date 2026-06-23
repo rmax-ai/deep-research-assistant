@@ -521,6 +521,108 @@
     return Object.entries(approvalsData?.approvals ?? {}).sort(([left], [right]) => left.localeCompare(right));
   }
 
+  function activeApprovalEntry() {
+    const pendingGate = runSummary?.awaiting_approval_gate;
+    const approvals = approvalsData?.approvals ?? {};
+
+    if (pendingGate && approvals[pendingGate]) {
+      return [pendingGate, approvals[pendingGate]];
+    }
+
+    const pendingEntry = Object.entries(approvals).find(([, approval]) => approval?.status === "pending");
+    if (pendingEntry) {
+      return pendingEntry;
+    }
+
+    if (pendingGate) {
+      return [
+        pendingGate,
+        {
+          gate: pendingGate,
+          status: "pending",
+          rationale: "",
+          display_data: {}
+        }
+      ];
+    }
+
+    return null;
+  }
+
+  function gateLabel(gateId) {
+    const labels = {
+      A: "Scope approval",
+      B: "Research plan approval",
+      C: "Outline approval",
+      D: "Publication approval"
+    };
+
+    return labels[gateId] ?? `Gate ${gateId}`;
+  }
+
+  function summarizeApproval(approvalId, approval) {
+    const displayData = approval?.display_data ?? {};
+
+    if (approvalId === "A") {
+      const objective = displayData.objective ?? {};
+      const scope = displayData.scope ?? {};
+      const perspectives = Array.isArray(displayData.proposed_perspectives)
+        ? displayData.proposed_perspectives.length
+        : 0;
+      const budget = displayData.budget ?? {};
+
+      return {
+        title: objective.title ?? "Approve proposed research scope",
+        items: [
+          `Risk level: ${displayData.risk_level ?? scope.risk_level ?? "unknown"}`,
+          `Primary question: ${objective.primary_question ?? "not provided"}`,
+          `Proposed perspectives: ${perspectives}`,
+          `Budgeted searches: ${budget.searches ?? "n/a"}`
+        ]
+      };
+    }
+
+    if (approvalId === "B") {
+      return {
+        title: "Approve the research plan before execution",
+        items: [
+          `Questions: ${Array.isArray(displayData.questions) ? displayData.questions.length : 0}`,
+          `Perspectives: ${Array.isArray(displayData.perspectives) ? displayData.perspectives.length : 0}`,
+          `Limitations: ${Array.isArray(displayData.limitations) ? displayData.limitations.length : 0}`
+        ]
+      };
+    }
+
+    if (approvalId === "C") {
+      const sourceMix = displayData.source_mix ?? {};
+      return {
+        title: "Approve the draft outline and evidence posture",
+        items: [
+          `Principal claims: ${Array.isArray(displayData.principal_claims) ? displayData.principal_claims.length : 0}`,
+          `Sources: ${sourceMix.sources ?? 0}`,
+          `Evidence fragments: ${sourceMix.evidence ?? 0}`
+        ]
+      };
+    }
+
+    if (approvalId === "D") {
+      const riskIndicators = displayData.risk_indicators ?? {};
+      return {
+        title: "Approve publication or external distribution",
+        items: [
+          `Final claims: ${Array.isArray(displayData.final_claims) ? displayData.final_claims.length : 0}`,
+          `Risk level: ${riskIndicators.risk_level ?? "unknown"}`,
+          `Blocking findings: ${riskIndicators.blocking_findings ?? 0}`
+        ]
+      };
+    }
+
+    return {
+      title: "Approve this workflow gate",
+      items: []
+    };
+  }
+
   async function hydrateSupplementaryData(targetRunId, token) {
     if (inspectorPending) {
       return;
@@ -1107,6 +1209,38 @@
           </div>
 
           <div class="summary-foot">
+            {#if runSummary?.status === "awaiting_approval" && activeApprovalEntry()}
+              {@const [approvalId, approval] = activeApprovalEntry()}
+              {@const summary = summarizeApproval(approvalId, approval)}
+              <div class="approval-banner" role="alert">
+                <div class="approval-banner-copy">
+                  <span class="meta-label">Approval required</span>
+                  <p>{gateLabel(approvalId)}. {summary.title}</p>
+                </div>
+
+                {#if summary.items.length > 0}
+                  <ul class="approval-summary-list">
+                    {#each summary.items as item}
+                      <li>{item}</li>
+                    {/each}
+                  </ul>
+                {/if}
+
+                <div class="action-row">
+                  {#each APPROVAL_ACTIONS as decision}
+                    <button
+                      class="btn secondary compact"
+                      type="button"
+                      disabled={approvalActionPending === `${approvalId}:${decision}`}
+                      on:click={() => handleApprovalAction(approvalId, decision)}
+                    >
+                      {approvalActionPending === `${approvalId}:${decision}` ? `${decision}…` : decision}
+                    </button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
             <p class="notice">{pollNotice || "Polling will begin after the run is created."}</p>
             <p class={`notice ${streamState === "disconnected" ? "warn" : ""}`}>{streamNotice}</p>
             {#if runError}
@@ -1212,6 +1346,24 @@
                 <p class:muted={!approval?.rationale}>
                   {approval?.rationale ?? "No rationale recorded."}
                 </p>
+
+                {#if true}
+                  {@const summary = summarizeApproval(approvalId, approval)}
+                  <div class="approval-context">
+                    <p class="approval-context-title">{summary.title}</p>
+                    {#if summary.items.length > 0}
+                      <ul class="approval-summary-list">
+                        {#each summary.items as item}
+                          <li>{item}</li>
+                        {/each}
+                      </ul>
+                    {/if}
+                    <details>
+                      <summary>Review payload</summary>
+                      <pre>{formatJson(approval?.display_data ?? {})}</pre>
+                    </details>
+                  </div>
+                {/if}
 
                 {#if approval?.status === "pending" || runSummary?.status === "awaiting_approval"}
                   <div class="action-row">
@@ -1874,6 +2026,42 @@
     gap: 0.45rem;
     padding-top: 0.4rem;
     border-top: 1px solid var(--line);
+  }
+
+  .approval-banner {
+    display: grid;
+    gap: 0.8rem;
+    padding: 0.95rem 1rem;
+    border-radius: 18px;
+    border: 1px solid rgba(214, 111, 69, 0.22);
+    background: rgba(214, 111, 69, 0.08);
+  }
+
+  .approval-banner-copy {
+    display: grid;
+    gap: 0.3rem;
+  }
+
+  .approval-banner-copy p {
+    margin: 0;
+  }
+
+  .approval-summary-list {
+    margin: 0;
+    padding-left: 1.1rem;
+    color: var(--text-soft);
+    display: grid;
+    gap: 0.2rem;
+  }
+
+  .approval-context {
+    display: grid;
+    gap: 0.6rem;
+  }
+
+  .approval-context-title {
+    margin: 0;
+    font-weight: 600;
   }
 
   .stack,

@@ -123,6 +123,7 @@ class RunStatusResponse(BaseModel):
     claims_count: int = 0
     sources_count: int = 0
     report_preview: str | None = None
+    awaiting_approval_gate: str | None = None
 
 
 class FrontierResponse(BaseModel):
@@ -821,6 +822,7 @@ async def create_research_run(request: CreateRunRequest) -> RunStatusResponse:
         claims_count=run_data["claims_count"],
         sources_count=run_data["sources_count"],
         report_preview=run_data["report"][:500] if run_data["report"] else None,
+        awaiting_approval_gate=run_data.get("awaiting_approval_gate"),
     )
 
 
@@ -838,6 +840,7 @@ async def get_research_run(run_id: str) -> RunStatusResponse:
         claims_count=run_data.get("claims_count", 0),
         sources_count=run_data.get("sources_count", 0),
         report_preview=run_data.get("report", "")[:500] if run_data.get("report") else None,
+        awaiting_approval_gate=run_data.get("awaiting_approval_gate"),
     )
 
 

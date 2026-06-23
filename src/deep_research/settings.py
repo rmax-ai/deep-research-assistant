@@ -38,10 +38,10 @@ class ModelRoutingConfig(BaseSettings):
         default_factory=lambda: ModelConfig(model="gemini-3-flash-preview")
     )
     reasoning: ModelConfig = Field(
-        default_factory=lambda: ModelConfig(model="gemini-3-pro")
+        default_factory=lambda: ModelConfig(model="gemini-3.1-pro-preview")
     )
     verification: ModelConfig = Field(
-        default_factory=lambda: ModelConfig(model="gemini-3-pro")
+        default_factory=lambda: ModelConfig(model="gemini-3.1-pro-preview")
     )
 
 

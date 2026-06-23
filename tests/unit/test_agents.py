@@ -188,8 +188,8 @@ class TestAgentInit:
 
         models = ModelRoutingConfig()
         assert models.fast.model == "gemini-3-flash-preview"
-        assert models.reasoning.model == "gemini-3-pro"
-        assert models.verification.model == "gemini-3-pro"
+        assert models.reasoning.model == "gemini-3.1-pro-preview"
+        assert models.verification.model == "gemini-3.1-pro-preview"
 
     def test_parse_json_code_fenced(self):
         from deep_research.agents import parse_json_response

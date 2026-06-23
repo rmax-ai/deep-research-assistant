@@ -280,6 +280,8 @@ class TestCreateRun:
                 raise AssertionError("Timed out waiting for awaiting_approval")
             await asyncio.sleep(0.01)
 
+        assert data["awaiting_approval_gate"] == "A"
+
         approvals = await client.get(f"/v1/research-runs/{run_id}/approvals")
         assert approvals.status_code == 200
         assert approvals.json()["approvals"]["A"]["status"] == "pending"
