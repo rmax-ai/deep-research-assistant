@@ -148,9 +148,52 @@ The runtime separates concerns across three planes:
 | Workflow | Deterministic orchestration, scheduling, budgets, checkpoints, recovery |
 | Cognitive | 14 bounded LLM agents with narrow roles and structured/text-fallback outputs |
 
-The shipped workflow is a 27-node ADK graph covering:
+The shipped workflow is a 27-node ADK graph:
 
-`scope_classify -> perspective_generate -> question_graph_build -> approve_plan -> scheduler_select -> search_plan_create -> source_retrieve -> source_policy_apply -> evidence_extract -> claims_construct -> knowledge_organize -> contradictions_search -> coverage_calculate -> moderator -> interventions_apply -> scope_change_apply -> stop_evaluate -> outline_build -> approve_outline -> draft_generate -> verify_draft -> repair_draft -> final_gate_check -> render_output`
+```mermaid
+flowchart TD
+    scope_classify["scope_classify"] --> perspective_generate["perspective_generate"]
+    perspective_generate --> question_graph_build["question_graph_build"]
+    question_graph_build --> approve_plan["approve_plan"]
+
+    approve_plan -->|rejected| scope_classify
+    approve_plan -->|approved| scheduler_select["scheduler_select"]
+    approve_plan -->|not required| plan_not_required["plan_not_required"]
+    plan_not_required --> scheduler_select
+
+    scheduler_select --> search_plan_create["search_plan_create"]
+    search_plan_create --> source_retrieve["source_retrieve"]
+    source_retrieve --> source_policy_apply["source_policy_apply"]
+    source_policy_apply --> evidence_extract["evidence_extract"]
+    evidence_extract --> claims_construct["claims_construct"]
+    claims_construct --> knowledge_organize["knowledge_organize"]
+    knowledge_organize --> contradictions_search["contradictions_search"]
+    contradictions_search --> coverage_calculate["coverage_calculate"]
+    coverage_calculate --> moderator["moderator"]
+    moderator --> interventions_apply["interventions_apply"]
+    interventions_apply --> scope_change_apply["scope_change_apply"]
+
+    scope_change_apply -->|scope changed| question_graph_build
+    scope_change_apply -->|continue| stop_evaluate["stop_evaluate"]
+
+    stop_evaluate -->|continue loop| scheduler_select
+    stop_evaluate -->|enough coverage| outline_build["outline_build"]
+
+    outline_build --> approve_outline["approve_outline"]
+    approve_outline -->|rejected| outline_build
+    approve_outline -->|approved| draft_generate["draft_generate"]
+    approve_outline -->|not required| outline_not_required["outline_not_required"]
+    outline_not_required --> draft_generate
+
+    draft_generate --> verify_draft["verify_draft"]
+    verify_draft --> repair_draft["repair_draft"]
+    repair_draft --> verify_draft
+    verify_draft --> final_gate_check["final_gate_check"]
+
+    final_gate_check -->|approved| render_output["render_output"]
+    final_gate_check -->|not required| publication_not_required["publication_not_required"]
+    publication_not_required --> render_output
+```
 
 Key implementation properties:
 
