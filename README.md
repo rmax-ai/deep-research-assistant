@@ -1,133 +1,203 @@
 # Deep Research Assistant
 
-**Enterprise-grade governed research runtime built on Google ADK 2.0**
+**Governed multi-agent research runtime built on Google ADK 2.0**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
-[![ADK 2.0](https://img.shields.io/badge/ADK-2.2.0+-green.svg)](https://github.com/google/adk-python)
+[![ADK 2.2.0+](https://img.shields.io/badge/ADK-2.2.0+-green.svg)](https://github.com/google/adk-python)
 
-Converts broad research requests into governed, inspectable, reproducible research workflows. Implements a staged epistemic pipeline: intent → scope → perspectives → questions → search → evidence → claims → contradictions → coverage analysis → outline → drafts → verification → approval → final report.
+Deep Research Assistant turns a broad research objective into a bounded, inspectable workflow with explicit scope, question graphs, source retrieval, immutable evidence fragments, claim records, approval gates, verification, and exportable report output.
 
-**The fundamental unit of quality is a supported, qualified, and traceable claim — not a polished paragraph.**
+The core unit of quality is a **supported, qualified, and traceable claim**, not a polished paragraph.
 
-## Quickstart (Coming in Phase 1)
+## Current Status
+
+The repository implements the runtime described in the website docs:
+
+- REST API for creating and inspecting research runs
+- 27-node ADK workflow with approval branches, repair loops, and resumable execution
+- 14 bounded Gemini-backed agents plus deterministic governance and workflow nodes
+- Durable run persistence, checkpoints, node execution records, approvals, and audit events
+- Streaming events, interventions, concept map projection, logs, and markdown export
+
+Implementation phase status currently matches the website:
+
+| Phase | Status |
+|-------|--------|
+| 0: Architecture Spike | Complete |
+| 1: Evidence-First MVP | Complete |
+| 2: STORM-Grade Iterative Research | Complete |
+| 3: Co-STORM Collaboration | Complete |
+| 4: Epistemic Reliability | Complete |
+| 5: Enterprise Governance | Complete |
+| 6: Continuous Research | Partial |
+
+## Quickstart
+
+### 1. Install dependencies
 
 ```bash
-# Create a research run
-curl -X POST http://localhost:8080/v1/research-runs \
+uv sync --extra dev
+```
+
+Optional PostgreSQL drivers:
+
+```bash
+uv sync --extra dev --extra pg
+```
+
+### 2. Configure environment
+
+Full runtime execution needs:
+
+- `DEEP_RESEARCH_GOOGLE_API_KEY` for Gemini-backed agents
+- `DEEP_RESEARCH_EXA_API_KEY` for web search
+
+Useful local defaults:
+
+```bash
+export DEEP_RESEARCH_GOOGLE_API_KEY="your-google-api-key"
+export DEEP_RESEARCH_EXA_API_KEY="your-exa-api-key"
+export DEEP_RESEARCH_APPROVALS__MODE="strict"
+```
+
+Optional overrides:
+
+```bash
+export DEEP_RESEARCH_DATABASE_URL="sqlite+aiosqlite:///deep_research.db"
+export DEEP_RESEARCH_LOG_FORMAT="console"
+```
+
+### 3. Start the API
+
+```bash
+uv run uvicorn deep_research.api.routes:app --host 0.0.0.0 --port 8080
+```
+
+### 4. Create a research run
+
+```bash
+curl -X POST "http://localhost:8080/v1/research-runs" \
   -H "Content-Type: application/json" \
   -d '{
     "objective": {
-      "title": "Secure agent runtime analysis",
-      "primary_question": "Which architectural controls are required for a secure enterprise agent runtime?"
+      "title": "ADK tool governance deep research demo",
+      "primary_question": "How should a Google ADK-based research assistant govern tool usage safely in an enterprise environment?",
+      "decision_to_support": "Choose runtime guardrails for production rollout",
+      "intended_audience": ["platform engineering", "security architecture"],
+      "output_type": "technical_report",
+      "desired_depth": "deep"
     },
+    "tenant_id": "demo",
+    "user_id": "architect-01",
     "mode": "review_first"
   }'
-
-# Inspect progress
-curl http://localhost:8080/v1/research-runs/{run_id}
-
-# Export final report
-curl -X POST http://localhost:8080/v1/research-runs/{run_id}/exports \
-  -d '{"format": "markdown"}'
 ```
+
+### 5. Inspect, approve, and export
+
+```bash
+curl "http://localhost:8080/v1/research-runs/$RUN_ID"
+curl "http://localhost:8080/v1/research-runs/$RUN_ID/approvals"
+curl -X POST "http://localhost:8080/v1/research-runs/$RUN_ID/approvals/A" \
+  -H "Content-Type: application/json" \
+  -d '{"decision":"approved","rationale":"Scope is acceptable","approver_id":"architect-01"}'
+curl "http://localhost:8080/v1/research-runs/$RUN_ID/progress"
+curl -N "http://localhost:8080/v1/research-runs/$RUN_ID/events"
+curl -X POST "http://localhost:8080/v1/research-runs/$RUN_ID/exports?format=markdown"
+```
+
+## API Surface
+
+Base URL:
+
+```text
+http://localhost:8080/v1
+```
+
+Implemented endpoints:
+
+- `POST /v1/research-runs`
+- `GET /v1/research-runs/{run_id}`
+- `GET /v1/research-runs/{run_id}/graph`
+- `GET /v1/research-runs/{run_id}/frontier`
+- `GET /v1/research-runs/{run_id}/progress`
+- `GET /v1/research-runs/{run_id}/events`
+- `GET /v1/research-runs/{run_id}/logs`
+- `GET /v1/research-runs/{run_id}/concept-map`
+- `POST /v1/research-runs/{run_id}/interventions`
+- `GET /v1/research-runs/{run_id}/approvals`
+- `POST /v1/research-runs/{run_id}/approvals/{approval_id}`
+- `POST /v1/research-runs/{run_id}/exports`
+
+API-created runs persist governance state and enforce approval pauses. In strict mode, required gates move the run into `awaiting_approval` until a decision is submitted and the workflow resumes from the latest checkpoint.
 
 ## Architecture
 
-The system separates concerns across three planes:
+The runtime separates concerns across three planes:
 
 | Plane | Responsibility |
 |-------|---------------|
-| **Governance** | Identity, authorization, policy, approvals, audit |
-| **Workflow** | Deterministic orchestration, scheduling, budgeting, persistence |
-| **Cognitive** | 14 bounded LLM agents with narrow mandates and structured outputs |
+| Governance | Identity propagation, policy evaluation, approvals, audit |
+| Workflow | Deterministic orchestration, scheduling, budgets, checkpoints, recovery |
+| Cognitive | 14 bounded LLM agents with narrow roles and structured/text-fallback outputs |
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for full system architecture, component diagrams, trust boundaries, and data model.
+The shipped workflow is a 27-node ADK graph covering:
 
-## Documentation
+`scope_classify -> perspective_generate -> question_graph_build -> approve_plan -> scheduler_select -> search_plan_create -> source_retrieve -> source_policy_apply -> evidence_extract -> claims_construct -> knowledge_organize -> contradictions_search -> coverage_calculate -> moderator -> interventions_apply -> scope_change_apply -> stop_evaluate -> outline_build -> approve_outline -> draft_generate -> verify_draft -> repair_draft -> final_gate_check -> render_output`
 
-| Document | Description |
-|----------|-------------|
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Full system architecture, 14 agents, data model, workflow topology, trust boundaries |
-| [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) | 12-threat structured analysis with attack paths, controls, and residual risk |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | 7-phase implementation plan with deliverables, dependencies, and exit criteria |
-| [`AGENTS.md`](AGENTS.md) | Code conventions for all AI coding agents working on this project |
+Key implementation properties:
 
-## Agent Roster
+- Evidence fragments preserve exact excerpts
+- Claims are atomic records linked to evidence and sources
+- Approval gates A/B/C/D are first-class runtime state
+- Audit events are append-only and chain-verified
+- Resume behavior restores from persisted checkpoints instead of replaying blindly
 
-| Agent | Role | Model Tier |
-|-------|------|-----------|
-| Research Director | Scope interpretation, plan proposal | Reasoning |
-| Perspective Planner | Discover research lenses | Reasoning |
-| Question Architect | Build initial question graph | Reasoning |
-| Research Moderator | Detect stagnation, rebalance breadth/depth | Reasoning |
-| Query Planner | Convert questions to executable searches | Fast |
-| Source Appraiser | Claim-relative authority assessment | Hybrid |
-| Evidence Curator | Extract evidence fragments | Reasoning |
-| Claim Builder | Convert evidence to atomic claims | Reasoning |
-| Counter-Evidence | Search for contradictions | Reasoning |
-| Knowledge Organizer | Maintain conceptual hierarchy | Fast |
-| Outline Architect | Structure reports from validated claims | Reasoning |
-| Section Writer | Generate prose from approved claims | Reasoning |
-| Verifier | Independent proposition verification | Verification |
-| Executive Synthesizer | Concise executive synthesis | Reasoning |
+## Models and Runtime
 
-## Key Principles
+Default model routing in the current implementation:
 
-- **Research is a workflow** — stateful graph with explicit transitions, not a chatbot
-- **Agents are bounded workers** — narrow mandates, constrained tools, structured outputs
-- **Questions are first-class objects** — stored, linked, ranked, resolved, reopened
-- **Claims are first-class objects** — reports generated from validated claim objects
-- **Evidence and inference are distinct** — what a source states ≠ what's extracted ≠ what's inferred
-- **Human review at semantic boundaries** — not after every model call
+- Fast: `gemini-3-flash-preview`
+- Reasoning: `gemini-3.1-pro-preview`
+- Verification: `gemini-3.1-pro-preview`
 
-## Implementation Status
+Core stack:
 
-| Phase | Status | Description |
-|-------|--------|-------------|
-| 0: Architecture Spike | 🔴 Backlog | ADK 2.0 workflow skeleton, one end-to-end demo |
-| 1: Evidence-First MVP | 🔴 Backlog | Core pipeline: scope → evidence → claims → report |
-| 2: STORM-Grade Research | 🔴 Backlog | Evidence-conditioned follow-up questions, semantic stopping |
-| 3: Co-STORM Collaboration | 🔴 Backlog | Live research frontier, user interventions, approval center |
-| 4: Epistemic Reliability | 🔴 Backlog | Contradiction detection, confidence model, independent verification |
-| 5: Enterprise Governance | 🔴 Backlog | Identity, policy, MCP, audit, tenant isolation |
-| 6: Continuous Research | 🔴 Backlog | Scheduled watches, reusable skills, knowledge publishing |
-
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for detailed deliverables per phase.
-
-## Tech Stack
-
-- **Runtime:** Google ADK 2.0 (Python)
-- **Database:** PostgreSQL (production) / SQLite (development)
-- **Models:** Google Gemini (3-flash-preview fast tier, 2.5-pro reasoning/verification)
-- **Build:** uv + Hatch + pyproject.toml
-- **Testing:** pytest + pytest-asyncio
-- **Linting:** ruff (format + check) + mypy strict
-- **Observability:** OpenTelemetry + structlog
+- Google ADK 2.2.0+
+- FastAPI
+- Pydantic v2
+- SQLAlchemy asyncio
+- SQLite for local/dev, PostgreSQL in production
+- `uv` + Hatch
 
 ## Validation
 
-Default validation is deterministic and always-on:
+Deterministic validation:
 
 ```bash
+uv run ruff format src tests
 uv run ruff check src tests
 uv run mypy src/deep_research
 uv run pytest
 ```
 
-Live Gemini validation is opt-in and bounded:
+Live Gemini validation remains opt-in:
 
 ```bash
-source .envrc
 uv run pytest -m live_llm
 ```
 
-The live suite validates real Gemini-backed agent behavior and a bounded workflow smoke with stubbed search/retrieval. It does not attempt a fully live internet-backed end-to-end research run by default.
+## Documentation
 
-GitHub Actions mirrors this split:
-- `CI` runs deterministic checks on pushes and pull requests
-- `Live Validation` is a separate manual workflow (`workflow_dispatch`) that requires `DEEP_RESEARCH_GOOGLE_API_KEY`
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): system architecture and workflow topology
+- [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md): security threat analysis
+- [docs/ROADMAP.md](docs/ROADMAP.md): implementation planning background
+- [docs/site/src/routes/+page.svx](docs/site/src/routes/+page.svx): website landing-page source
+- [docs/site/src/routes/api/+page.svx](docs/site/src/routes/api/+page.svx): website API docs source
+- [docs/site/src/routes/architecture/+page.svx](docs/site/src/routes/architecture/+page.svx): website architecture docs source
+- [AGENTS.md](AGENTS.md): contributor and coding-agent conventions
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT. See [LICENSE](LICENSE).
