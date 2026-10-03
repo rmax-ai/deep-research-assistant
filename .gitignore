@@ -32,3 +32,19 @@ snapshots/
 # OS
 .DS_Store
 Thumbs.db
+
+# gitignore-hygiene additions (2026-10-03)
+!.env.example
+!.env.sample
+!.env.template
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage/
+node_modules/
+.next/
+.svelte-kit/
+.turbo/
